@@ -755,11 +755,15 @@ public class MainActivity extends AppCompatActivity {
         if (shortcutName != null) {
             selectedGameName = shortcutName;
 
+            // Cyclone: when launched from the WebView's Play button, the play URI is
+            // passed here to override the stored exeArguments (fresh token each time).
+            String cycloneExeArgs = intent.getStringExtra("cycloneExeArgs");
+
             Intent runActivityIntent = new Intent(this, EmulationActivity.class);
             Intent runWineIntent = new Intent(ACTION_RUN_WINE);
 
             runWineIntent.putExtra("exePath", getExePath(shortcutName));
-            runWineIntent.putExtra("exeArguments", getExeArguments(shortcutName));
+            runWineIntent.putExtra("exeArguments", cycloneExeArgs != null ? cycloneExeArgs : getExeArguments(shortcutName));
             runWineIntent.putExtra("driverName", getVulkanDriver(selectedGameName));
             runWineIntent.putExtra("driverType", getVulkanDriverType(selectedGameName));
             runWineIntent.putExtra("box64Version", getBox64Version(selectedGameName));
@@ -793,7 +797,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @SuppressLint("SdCardPath")
-    public static final File appRootDir = new File("/data/data/com.micewine.emu/files");
+    public static final File appRootDir = new File("/data/data/" + com.micewine.emu.BuildConfig.APPLICATION_ID + "/files");
     public static File ratPackagesDir = new File(appRootDir + "/packages");
     public static String deviceArch = Build.SUPPORTED_ABIS[0].replace("arm64-v8a", "aarch64");
     public static final String unixUsername = runCommandWithOutput("whoami", false).replace("\n", "");

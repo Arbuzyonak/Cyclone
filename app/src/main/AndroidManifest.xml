@@ -65,15 +65,22 @@
             android:exported="false">
         </activity>
         <activity
-            android:name=".activities.MainActivity"
-            android:configChanges="fontScale|orientation|screenSize|keyboard|keyboardHidden|layoutDirection|locale|mcc|mnc|navigation|screenLayout|touchscreen|uiMode|smallestScreenSize|density"
+            android:name="io.github.arbuzyonak.cyclone.CycloneWebActivity"
             android:exported="true"
-            android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|keyboardHidden"
             android:theme="@style/Theme.MiceWine">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".activities.MainActivity"
+            android:configChanges="fontScale|orientation|screenSize|keyboard|keyboardHidden|layoutDirection|locale|mcc|mnc|navigation|screenLayout|touchscreen|uiMode|smallestScreenSize|density"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.MiceWine">
             <intent-filter>
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
