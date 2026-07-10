@@ -98,6 +98,9 @@ import static com.micewine.emu.fragments.FloatingFileManagerFragment.OPERATION_S
 import static com.micewine.emu.fragments.ShortcutsFragment.ADRENO_TOOLS_DRIVER;
 import static com.micewine.emu.fragments.ShortcutsFragment.MESA_DRIVER;
 import static com.micewine.emu.fragments.ShortcutsFragment.addGameToList;
+import static com.micewine.emu.fragments.ShortcutsFragment.putExeArguments;
+import com.micewine.emu.adapters.AdapterGame;
+import com.micewine.emu.adapters.AdapterEnvVar;
 import static com.micewine.emu.fragments.ShortcutsFragment.getBox64Preset;
 import static com.micewine.emu.fragments.ShortcutsFragment.getBox64Version;
 import static com.micewine.emu.fragments.ShortcutsFragment.getCpuAffinity;
@@ -753,37 +756,16 @@ public class MainActivity extends AppCompatActivity {
         String shortcutName = intent.getStringExtra("shortcutName");
 
         if (shortcutName != null) {
-            selectedGameName = shortcutName;
-
-            // Cyclone: when launched from the WebView's Play button, the play URI is
-            // passed here to override the stored exeArguments (fresh token each time).
+            // Cyclone: launched from the WebView's Play button, which passes the fresh
+            // play URI (cycloneExeArgs) and the session token (to fetch Vortex.exe).
             String cycloneExeArgs = intent.getStringExtra("cycloneExeArgs");
+            String cycloneSessionToken = intent.getStringExtra("cycloneSessionToken");
 
-            Intent runActivityIntent = new Intent(this, EmulationActivity.class);
-            Intent runWineIntent = new Intent(ACTION_RUN_WINE);
-
-            runWineIntent.putExtra("exePath", getExePath(shortcutName));
-            runWineIntent.putExtra("exeArguments", cycloneExeArgs != null ? cycloneExeArgs : getExeArguments(shortcutName));
-            runWineIntent.putExtra("driverName", getVulkanDriver(selectedGameName));
-            runWineIntent.putExtra("driverType", getVulkanDriverType(selectedGameName));
-            runWineIntent.putExtra("box64Version", getBox64Version(selectedGameName));
-            runWineIntent.putExtra("box64Preset", getBox64Preset(selectedGameName));
-            runWineIntent.putExtra("displayResolution", getDisplaySettings(selectedGameName).get(1));
-            runWineIntent.putExtra("virtualControllerPreset", getSelectedVirtualControllerPreset(selectedGameName));
-            runWineIntent.putExtra("d3dxRenderer", getD3DXRenderer(selectedGameName));
-            runWineIntent.putExtra("wineD3D", getWineD3DVersion(selectedGameName));
-            runWineIntent.putExtra("dxvk", getDXVKVersion(selectedGameName));
-            runWineIntent.putExtra("vkd3d", getVKD3DVersion(selectedGameName));
-            runWineIntent.putExtra("esync", getWineESync(selectedGameName));
-            runWineIntent.putExtra("services", getWineServices(selectedGameName));
-            runWineIntent.putExtra("virtualDesktop", getWineVirtualDesktop(selectedGameName));
-            runWineIntent.putExtra("enableXInput", getEnableXInput(selectedGameName));
-            runWineIntent.putExtra("enableDInput", getEnableDInput(selectedGameName));
-            runWineIntent.putExtra("cpuAffinity", getCpuAffinity(selectedGameName));
-
-            sendBroadcast(runWineIntent);
-            startActivity(runActivityIntent);
-
+            if (cycloneExeArgs != null) {
+                cycloneEnsureAndLaunch(shortcutName, cycloneExeArgs, cycloneSessionToken);
+            } else {
+                launchNamedGame(shortcutName, null);
+            }
             return;
         }
 
@@ -794,6 +776,122 @@ public class MainActivity extends AppCompatActivity {
         if (filePath == null) return;
 
         new EditGamePreferencesFragment(FILE_MANAGER_START_PREFERENCES, new File(filePath)).show(getSupportFragmentManager(), "");
+    }
+
+    // ---- Cyclone launch orchestration ----
+
+    private boolean cycloneRuntimeReady() {
+        boolean box64 = deviceArch.equals("x86_64") || haveAnyPackageByCategory(BOX64);
+        return haveAnyPackageByCategory(CORE) && haveAnyPackageByCategory(WINE)
+                && haveAnyPackageByCategory(VK_DRIVER) && haveAnyPackageByCategory(DXVK)
+                && haveAnyPackageByCategory(VKD3D) && haveAnyPackageByCategory(WINED3D)
+                && box64 && !getWinePrefixes().isEmpty();
+    }
+
+    /** Ensure the "Vortex" game entry + Vortex.exe exist, then launch with the fresh URI. */
+    private void cycloneEnsureAndLaunch(String shortcutName, String exeArgs, String sessionToken) {
+        if (!cycloneRuntimeReady()) {
+            // MainActivity.onPostCreate launches the provisioning wizard when unprovisioned.
+            runOnUiThread(() -> Toast.makeText(this,
+                    "Setting up Cyclone (one-time). Tap Play again when finished.",
+                    Toast.LENGTH_LONG).show());
+            return;
+        }
+
+        new Thread(() -> {
+            // Seed the Vortex game entry on first run (valid default driver/dxvk IDs from
+            // the constructor); refresh its arguments with the fresh play URI each launch.
+            if (getExePath("Vortex").isEmpty()) {
+                AdapterGame.GameItem item = new AdapterGame.GameItem("Vortex", "c:\\Vortex\\Vortex.exe", exeArgs, "");
+                item.envVars.add(new AdapterEnvVar.EnvVar("WINEDLLOVERRIDES", "windows.gaming.input="));
+                item.envVars.add(new AdapterEnvVar.EnvVar("BOX64_DYNAREC_BIGBLOCK", "0"));
+                item.envVars.add(new AdapterEnvVar.EnvVar("BOX64_DYNAREC_CALLRET", "0"));
+                item.envVars.add(new AdapterEnvVar.EnvVar("BOX64_DYNAREC_STRONGMEM", "1"));
+                item.envVars.add(new AdapterEnvVar.EnvVar("BOX64_DYNAREC_SAFEFLAGS", "2"));
+                ShortcutsFragment.gameList.add(item);
+                ShortcutsFragment.saveShortcuts();
+            } else {
+                putExeArguments("Vortex", exeArgs);
+            }
+
+            File exe = new File(winePrefixesDir, winePrefix + "/drive_c/Vortex/Vortex.exe");
+            if (!exe.exists() || exe.length() < 1024) {
+                runOnUiThread(() -> Toast.makeText(this, "Downloading Vortex…", Toast.LENGTH_SHORT).show());
+                if (!downloadVortexExe(exe, sessionToken)) {
+                    runOnUiThread(() -> Toast.makeText(this,
+                            "Couldn't download Vortex. Make sure you're signed in.",
+                            Toast.LENGTH_LONG).show());
+                    return;
+                }
+            }
+
+            runOnUiThread(() -> launchNamedGame("Vortex", exeArgs));
+        }).start();
+    }
+
+    /** Fetch Vortex.exe from playvortex.io/download/windows (a zip) into the prefix. */
+    private boolean downloadVortexExe(File dest, String sessionToken) {
+        try {
+            //noinspection ResultOfMethodCallIgnored
+            dest.getParentFile().mkdirs();
+            okhttp3.OkHttpClient client = new okhttp3.OkHttpClient();
+            okhttp3.Request.Builder rb = new okhttp3.Request.Builder()
+                    .url("https://playvortex.io/download/windows");
+            if (sessionToken != null && !sessionToken.isEmpty()) {
+                rb.header("Cookie", "session_token=" + sessionToken);
+            }
+            try (okhttp3.Response resp = client.newCall(rb.build()).execute()) {
+                if (!resp.isSuccessful() || resp.body() == null) return false;
+                java.util.zip.ZipInputStream zis =
+                        new java.util.zip.ZipInputStream(resp.body().byteStream());
+                java.util.zip.ZipEntry entry;
+                while ((entry = zis.getNextEntry()) != null) {
+                    String n = entry.getName().toLowerCase();
+                    if (!entry.isDirectory() && n.endsWith(".exe") && n.contains("vortex")) {
+                        try (java.io.OutputStream out = new java.io.FileOutputStream(dest)) {
+                            byte[] buf = new byte[8192];
+                            int r;
+                            while ((r = zis.read(buf)) != -1) out.write(buf, 0, r);
+                        }
+                        zis.closeEntry();
+                        return dest.exists() && dest.length() > 1024;
+                    }
+                    zis.closeEntry();
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return false;
+    }
+
+    /** Launch a stored game by name, optionally overriding its stored arguments. */
+    private void launchNamedGame(String name, String overrideArgs) {
+        selectedGameName = name;
+
+        Intent runActivityIntent = new Intent(this, EmulationActivity.class);
+        Intent runWineIntent = new Intent(ACTION_RUN_WINE);
+
+        runWineIntent.putExtra("exePath", getExePath(name));
+        runWineIntent.putExtra("exeArguments", overrideArgs != null ? overrideArgs : getExeArguments(name));
+        runWineIntent.putExtra("driverName", getVulkanDriver(selectedGameName));
+        runWineIntent.putExtra("driverType", getVulkanDriverType(selectedGameName));
+        runWineIntent.putExtra("box64Version", getBox64Version(selectedGameName));
+        runWineIntent.putExtra("box64Preset", getBox64Preset(selectedGameName));
+        runWineIntent.putExtra("displayResolution", getDisplaySettings(selectedGameName).get(1));
+        runWineIntent.putExtra("virtualControllerPreset", getSelectedVirtualControllerPreset(selectedGameName));
+        runWineIntent.putExtra("d3dxRenderer", getD3DXRenderer(selectedGameName));
+        runWineIntent.putExtra("wineD3D", getWineD3DVersion(selectedGameName));
+        runWineIntent.putExtra("dxvk", getDXVKVersion(selectedGameName));
+        runWineIntent.putExtra("vkd3d", getVKD3DVersion(selectedGameName));
+        runWineIntent.putExtra("esync", getWineESync(selectedGameName));
+        runWineIntent.putExtra("services", getWineServices(selectedGameName));
+        runWineIntent.putExtra("virtualDesktop", getWineVirtualDesktop(selectedGameName));
+        runWineIntent.putExtra("enableXInput", getEnableXInput(selectedGameName));
+        runWineIntent.putExtra("enableDInput", getEnableDInput(selectedGameName));
+        runWineIntent.putExtra("cpuAffinity", getCpuAffinity(selectedGameName));
+
+        sendBroadcast(runWineIntent);
+        startActivity(runActivityIntent);
     }
 
     @SuppressLint("SdCardPath")

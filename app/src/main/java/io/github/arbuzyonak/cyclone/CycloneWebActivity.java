@@ -188,11 +188,25 @@ public class CycloneWebActivity extends AppCompatActivity {
      */
     private void onVortexUri(Uri uri) {
         String singleQuoted = "'" + uri.toString() + "'";
+        // The session cookie (from login in this WebView) lets the runtime fetch
+        // Vortex.exe on first launch.
+        String sessionToken = extractSessionToken();
         Intent launch = new Intent(this, com.micewine.emu.activities.MainActivity.class);
         launch.putExtra("shortcutName", "Vortex");
         launch.putExtra("cycloneExeArgs", singleQuoted);
+        launch.putExtra("cycloneSessionToken", sessionToken);
         launch.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         startActivity(launch);
+    }
+
+    private String extractSessionToken() {
+        String cookies = CookieManager.getInstance().getCookie("https://playvortex.io");
+        if (cookies == null) return "";
+        for (String c : cookies.split(";")) {
+            String t = c.trim();
+            if (t.startsWith("session_token=")) return t.substring("session_token=".length());
+        }
+        return "";
     }
 
     private boolean isAllowedHost(Uri url) {

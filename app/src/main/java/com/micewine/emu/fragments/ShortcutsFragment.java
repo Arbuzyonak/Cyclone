@@ -256,7 +256,7 @@ public class ShortcutsFragment extends Fragment {
         }
     }
 
-    private static ArrayList<AdapterGame.GameItem> gameList = new ArrayList<>();
+    public static ArrayList<AdapterGame.GameItem> gameList = new ArrayList<>();
     private static final FileManagerControllerSettings fileManagerControllerSettings = new FileManagerControllerSettings();
 
     public static class FileManagerControllerSettings {
