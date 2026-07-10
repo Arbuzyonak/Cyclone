@@ -277,4 +277,10 @@
     <string name="cyclone_error_title" translatable="false">Can\'t connect</string>
     <string name="cyclone_error_message" translatable="false">Cyclone couldn\'t reach playvortex.io. Check your connection and try again.</string>
     <string name="cyclone_retry" translatable="false">Retry</string>
+    <string name="cyclone_setup_preparing" translatable="false">Setting up Cyclone (one-time)…</string>
+    <string name="cyclone_setup_downloading" translatable="false">Downloading runtime…</string>
+    <string name="cyclone_setup_installing" translatable="false">Installing components…</string>
+    <string name="cyclone_setup_prefix" translatable="false">Preparing Windows environment…</string>
+    <string name="cyclone_setup_game" translatable="false">Downloading Vortex…</string>
+    <string name="cyclone_setup_launching" translatable="false">Launching…</string>
 </resources>

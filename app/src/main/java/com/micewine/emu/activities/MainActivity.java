@@ -162,7 +162,10 @@ import com.micewine.emu.BuildConfig;
 import com.micewine.emu.R;
 import com.micewine.emu.adapters.AdapterBottomNavigation;
 import com.micewine.emu.controller.ControllerUtils;
+import android.widget.ProgressBar;
 import com.micewine.emu.core.RatPackageManager;
+import com.micewine.emu.fragments.RatDownloaderFragment;
+import com.micewine.emu.fragments.CoreComponentsDownloaderFragment;
 import com.micewine.emu.core.WineWrapper;
 import com.micewine.emu.databinding.ActivityMainBinding;
 import com.micewine.emu.fragments.AskInstallPackageFragment;
@@ -466,6 +469,7 @@ public class MainActivity extends AppCompatActivity {
 
     private BottomNavigationView bottomNavigation;
     private ViewPager2 viewPager;
+    private boolean cycloneMode = false;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -482,8 +486,16 @@ public class MainActivity extends AppCompatActivity {
         inputManager = (InputManager) getSystemService(INPUT_SERVICE);
         inputManager.registerInputDeviceListener(inputDeviceListener, null);
 
+        // Cyclone: when launched from the WebView's Play button, run headless — never
+        // show MiceWine's shortcuts UI, only a progress overlay while provisioning.
+        cycloneMode = getIntent().getStringExtra("cycloneExeArgs") != null;
+
         ActivityMainBinding binding = ActivityMainBinding.inflate(getLayoutInflater());
-        setContentView(binding.getRoot());
+        if (!cycloneMode) {
+            setContentView(binding.getRoot());
+        } else {
+            setContentView(R.layout.cyclone_setup);
+        }
 
         setSharedVars(this);
 
@@ -494,27 +506,29 @@ public class MainActivity extends AppCompatActivity {
         editor.putString(APP_VERSION, BuildConfig.VERSION_NAME);
         editor.apply();
 
-        bottomNavigation = findViewById(R.id.bottom_navigation);
-        bottomNavigation.setOnItemSelectedListener(item -> {
-            if (item.getItemId() == R.id.nav_shortcuts) {
-                selectedFragmentId = 0;
-                updateShortcuts();
-            } else if (item.getItemId() == R.id.nav_settings) {
-                selectedFragmentId = 1;
-            } else if (item.getItemId() == R.id.nav_file_manager) {
-                selectedFragmentId = 2;
-            } else if (item.getItemId() == R.id.nav_about) {
-                selectedFragmentId = 3;
-            }
-            viewPager.setCurrentItem(selectedFragmentId);
-            return true;
-        });
+        if (!cycloneMode) {
+            bottomNavigation = findViewById(R.id.bottom_navigation);
+            bottomNavigation.setOnItemSelectedListener(item -> {
+                if (item.getItemId() == R.id.nav_shortcuts) {
+                    selectedFragmentId = 0;
+                    updateShortcuts();
+                } else if (item.getItemId() == R.id.nav_settings) {
+                    selectedFragmentId = 1;
+                } else if (item.getItemId() == R.id.nav_file_manager) {
+                    selectedFragmentId = 2;
+                } else if (item.getItemId() == R.id.nav_about) {
+                    selectedFragmentId = 3;
+                }
+                viewPager.setCurrentItem(selectedFragmentId);
+                return true;
+            });
 
-        viewPager = findViewById(R.id.viewPager);
-        viewPager.setAdapter(new AdapterBottomNavigation(this));
-        viewPager.setUserInputEnabled(false);
+            viewPager = findViewById(R.id.viewPager);
+            viewPager.setAdapter(new AdapterBottomNavigation(this));
+            viewPager.setUserInputEnabled(false);
 
-        bottomNavigation.post(() -> bottomNavigation.setSelectedItemId(R.id.nav_shortcuts));
+            bottomNavigation.post(() -> bottomNavigation.setSelectedItemId(R.id.nav_shortcuts));
+        }
 
         registerReceiver(receiver, new IntentFilter() {{
             addAction(ACTION_RUN_WINE);
@@ -560,7 +574,9 @@ public class MainActivity extends AppCompatActivity {
         boolean hasWinePrefix = !(getWinePrefixes().isEmpty());
         boolean canProceed = (hasCore && hasWine && hasWinePrefix && hasVulkanDriver && hasDXVK && hasVKD3D && hasWineD3D && (deviceArch.equals("x86_64") || hasBox64));
 
-        if (!canProceed) startActivity(new Intent(this, WelcomeActivity.class));
+        // Cyclone provisions headlessly (see cycloneEnsureAndLaunch); everyone else uses
+        // MiceWine's setup wizard.
+        if (!canProceed && !cycloneMode) startActivity(new Intent(this, WelcomeActivity.class));
     }
 
     @Override
@@ -788,19 +804,18 @@ public class MainActivity extends AppCompatActivity {
                 && box64 && !getWinePrefixes().isEmpty();
     }
 
-    /** Ensure the "Vortex" game entry + Vortex.exe exist, then launch with the fresh URI. */
+    /** Full automatic flow: provision runtime if needed, ensure Vortex.exe, then launch. */
     private void cycloneEnsureAndLaunch(String shortcutName, String exeArgs, String sessionToken) {
-        if (!cycloneRuntimeReady()) {
-            // MainActivity.onPostCreate launches the provisioning wizard when unprovisioned.
-            runOnUiThread(() -> Toast.makeText(this,
-                    "Setting up Cyclone (one-time). Tap Play again when finished.",
-                    Toast.LENGTH_LONG).show());
-            return;
-        }
-
         new Thread(() -> {
-            // Seed the Vortex game entry on first run (valid default driver/dxvk IDs from
-            // the constructor); refresh its arguments with the fresh play URI each launch.
+            if (!cycloneRuntimeReady()) {
+                if (!cycloneProvision() || !cycloneRuntimeReady()) {
+                    cycloneFail("Setup failed. Check your connection and try again.");
+                    return;
+                }
+            }
+
+            // Seed the "Vortex" entry on first run (GameItem ctor picks valid installed
+            // driver/dxvk IDs); refresh its arguments with the fresh play URI each launch.
             if (getExePath("Vortex").isEmpty()) {
                 AdapterGame.GameItem item = new AdapterGame.GameItem("Vortex", "c:\\Vortex\\Vortex.exe", exeArgs, "");
                 item.envVars.add(new AdapterEnvVar.EnvVar("WINEDLLOVERRIDES", "windows.gaming.input="));
@@ -816,17 +831,115 @@ public class MainActivity extends AppCompatActivity {
 
             File exe = new File(winePrefixesDir, winePrefix + "/drive_c/Vortex/Vortex.exe");
             if (!exe.exists() || exe.length() < 1024) {
-                runOnUiThread(() -> Toast.makeText(this, "Downloading Vortex…", Toast.LENGTH_SHORT).show());
+                cycloneStatus(getString(R.string.cyclone_setup_game));
                 if (!downloadVortexExe(exe, sessionToken)) {
-                    runOnUiThread(() -> Toast.makeText(this,
-                            "Couldn't download Vortex. Make sure you're signed in.",
-                            Toast.LENGTH_LONG).show());
+                    cycloneFail("Couldn't download Vortex. Make sure you're signed in.");
                     return;
                 }
             }
 
+            cycloneStatus(getString(R.string.cyclone_setup_launching));
             runOnUiThread(() -> launchNamedGame("Vortex", exeArgs));
         }).start();
+    }
+
+    /** Headless one-time runtime provisioning: download + install the known-good package
+     *  set, then create the Wine prefix. Blocks; call off the UI thread. */
+    private boolean cycloneProvision() {
+        try {
+            setSharedVars(this);
+            appRootDir.mkdirs();
+            ratPackagesDir.mkdirs();
+            tmpDir.mkdirs();
+            homeDir.mkdirs();
+            iconsDir.mkdirs();
+            winePrefixesDir.mkdirs();
+
+            cycloneStatus(getString(R.string.cyclone_setup_downloading));
+            java.util.List<RatDownloaderFragment.RepoRatPackage> all = RatDownloaderFragment.fetchPackages();
+            if (all.isEmpty()) return false;
+
+            java.util.List<RatDownloaderFragment.RepoRatPackage> sel = new java.util.ArrayList<>();
+            addPkg(sel, all, "MiceWine-Core", "aarch64");
+            addPkg(sel, all, "box64-0.4.0", null);
+            addPkg(sel, all, "wine-10.10", null);
+            addPkg(sel, all, "mesa-vulkan-freedreno-25.1.4", null);   // Turnip
+            addPkg(sel, all, "mesa-vulkan-wrapper-25.1.4", "adrenotools"); // Wrapper (exclude adrenotools)
+            addPkg(sel, all, "DXVK-1.9.4-any", null);
+            addPkg(sel, all, "WineD3D-10.0-any", null);
+            addPkg(sel, all, "VKD3D-2.8-any", null);
+
+            SetupFragment.ProgressCallback installCb = new SetupFragment.ProgressCallback() {
+                public void onProgressChanged(int progress) { cycloneProgress(progress); }
+                public void setProgressBarIndeterminate(boolean indeterminate) { }
+                public void setDialogText(String text) { }
+            };
+
+            int total = sel.size();
+            for (int i = 0; i < total; i++) {
+                RatDownloaderFragment.RepoRatPackage p = sel.get(i);
+                if (p == null) continue;
+                final String label = p.ratPackage.name;
+                final int n = i + 1;
+                cycloneStatus("Downloading " + label + " (" + n + "/" + total + ")");
+                CoreComponentsDownloaderFragment.downloadPackage(p.repoRatName,
+                        (progress, mbps, read, len) -> cycloneProgress(progress));
+                File f = new File(tmpDir, p.repoRatName);
+                if (!f.exists()) return false;
+                cycloneStatus("Installing " + label);
+                RatPackageManager.installRat(new RatPackageManager.RatPackage(f.getPath()), installCb);
+                f.delete();
+            }
+
+            cycloneStatus(getString(R.string.cyclone_setup_prefix));
+            if (winePrefix == null) winePrefix = "default";
+            addGameToList(getString(R.string.desktop_mode_init), getString(R.string.desktop_mode_init), "");
+            java.util.List<RatPackageManager.RatPackage> winePackages = listRatPackages("Wine");
+            if (winePackages.isEmpty()) return false;
+            createWinePrefix(winePrefix, winePackages.get(0).getFolderName());
+
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** Add the first repo package whose filename contains {@code contains} and not {@code exclude}. */
+    private void addPkg(java.util.List<RatDownloaderFragment.RepoRatPackage> out,
+                        java.util.List<RatDownloaderFragment.RepoRatPackage> all,
+                        String contains, String exclude) {
+        for (RatDownloaderFragment.RepoRatPackage p : all) {
+            String name = p.repoRatName;
+            if (name.contains(contains) && (exclude == null || !name.contains(exclude))) {
+                out.add(p);
+                return;
+            }
+        }
+    }
+
+    private void cycloneStatus(String text) {
+        runOnUiThread(() -> {
+            android.widget.TextView tv = findViewById(R.id.cyclone_setup_status);
+            if (tv != null) tv.setText(text);
+        });
+    }
+
+    private void cycloneProgress(int progress) {
+        runOnUiThread(() -> {
+            ProgressBar pb = findViewById(R.id.cyclone_setup_progress);
+            if (pb != null) {
+                pb.setIndeterminate(false);
+                pb.setProgress(progress);
+            }
+        });
+    }
+
+    private void cycloneFail(String msg) {
+        runOnUiThread(() -> {
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+            android.widget.TextView tv = findViewById(R.id.cyclone_setup_status);
+            if (tv != null) tv.setText(msg);
+        });
     }
 
     /** Fetch Vortex.exe from playvortex.io/download/windows (a zip) into the prefix. */
