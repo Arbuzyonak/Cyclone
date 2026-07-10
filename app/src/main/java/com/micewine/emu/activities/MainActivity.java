@@ -809,12 +809,15 @@ public class MainActivity extends AppCompatActivity {
     /** Full automatic flow: provision runtime if needed, ensure Vortex.exe, then launch. */
     private void cycloneEnsureAndLaunch(String shortcutName, String exeArgs, String sessionToken) {
         new Thread(() -> {
+            android.util.Log.i("CycloneFlow", "start; token=" + (sessionToken == null ? "null" : sessionToken.length() + " chars") + " ready=" + cycloneRuntimeReady());
             if (!cycloneRuntimeReady()) {
                 if (!cycloneProvision() || !cycloneRuntimeReady()) {
+                    android.util.Log.e("CycloneFlow", "provision/ready failed");
                     cycloneFail("Setup failed. Check your connection and try again.");
                     return;
                 }
             }
+            android.util.Log.i("CycloneFlow", "runtime ready, winePrefix=" + winePrefix);
 
             // Seed the "Vortex" entry on first run (GameItem ctor picks valid installed
             // driver/dxvk IDs); refresh its arguments with the fresh play URI each launch.
@@ -832,14 +835,18 @@ public class MainActivity extends AppCompatActivity {
             }
 
             File exe = new File(winePrefixesDir, winePrefix + "/drive_c/Vortex/Vortex.exe");
+            android.util.Log.i("CycloneFlow", "vortex.exe path=" + exe.getPath() + " exists=" + exe.exists() + " len=" + (exe.exists() ? exe.length() : -1));
             if (!exe.exists() || exe.length() < 1024) {
                 cycloneStatus(getString(R.string.cyclone_setup_game));
-                if (!downloadVortexExe(exe, sessionToken)) {
+                boolean ok = downloadVortexExe(exe, sessionToken);
+                android.util.Log.i("CycloneFlow", "downloadVortexExe result=" + ok + " len=" + (exe.exists() ? exe.length() : -1));
+                if (!ok) {
                     cycloneFail("Couldn't download Vortex. Make sure you're signed in.");
                     return;
                 }
             }
 
+            android.util.Log.i("CycloneFlow", "launching Vortex");
             cycloneStatus(getString(R.string.cyclone_setup_launching));
             runOnUiThread(() -> launchNamedGame("Vortex", exeArgs));
         }).start();
@@ -961,12 +968,17 @@ public class MainActivity extends AppCompatActivity {
                 rb.header("Cookie", "session_token=" + sessionToken);
             }
             try (okhttp3.Response resp = client.newCall(rb.build()).execute()) {
+                android.util.Log.i("CycloneFlow", "vortex download HTTP " + resp.code()
+                        + " ctype=" + (resp.body() != null ? resp.body().contentType() : "null")
+                        + " clen=" + (resp.body() != null ? resp.body().contentLength() : -1)
+                        + " hasToken=" + (sessionToken != null && !sessionToken.isEmpty()));
                 if (!resp.isSuccessful() || resp.body() == null) return false;
                 java.util.zip.ZipInputStream zis =
                         new java.util.zip.ZipInputStream(resp.body().byteStream());
                 java.util.zip.ZipEntry entry;
                 while ((entry = zis.getNextEntry()) != null) {
                     String n = entry.getName().toLowerCase();
+                    android.util.Log.i("CycloneFlow", "zip entry: " + entry.getName());
                     if (!entry.isDirectory() && n.endsWith(".exe") && n.contains("vortex")) {
                         try (java.io.OutputStream out = new java.io.FileOutputStream(dest)) {
                             byte[] buf = new byte[8192];
@@ -974,12 +986,15 @@ public class MainActivity extends AppCompatActivity {
                             while ((r = zis.read(buf)) != -1) out.write(buf, 0, r);
                         }
                         zis.closeEntry();
+                        android.util.Log.i("CycloneFlow", "extracted vortex.exe len=" + dest.length());
                         return dest.exists() && dest.length() > 1024;
                     }
                     zis.closeEntry();
                 }
+                android.util.Log.e("CycloneFlow", "no vortex .exe found in zip");
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            android.util.Log.e("CycloneFlow", "download exception: " + e);
         }
         return false;
     }
@@ -991,7 +1006,10 @@ public class MainActivity extends AppCompatActivity {
         Intent runActivityIntent = new Intent(this, EmulationActivity.class);
         Intent runWineIntent = new Intent(ACTION_RUN_WINE);
 
-        runWineIntent.putExtra("exePath", getExePath(name));
+        // Convert the stored Windows path (c:\Vortex\Vortex.exe) to a real unix path,
+        // exactly like AdapterGame does — runWine needs a path with unix separators.
+        String exePath = new File(getUnixPath(getExePath(name))).getPath();
+        runWineIntent.putExtra("exePath", exePath);
         runWineIntent.putExtra("exeArguments", overrideArgs != null ? overrideArgs : getExeArguments(name));
         runWineIntent.putExtra("driverName", getVulkanDriver(selectedGameName));
         runWineIntent.putExtra("driverType", getVulkanDriverType(selectedGameName));
