@@ -818,6 +818,9 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
             android.util.Log.i("CycloneFlow", "runtime ready, winePrefix=" + winePrefix);
+            // Always refresh shared vars (recreates the usr->Core symlink the X server
+            // needs) before launching, in case a prior provision left it stale.
+            setSharedVars(this);
 
             // Seed the "Vortex" entry on first run (GameItem ctor picks valid installed
             // driver/dxvk IDs); refresh its arguments with the fresh play URI each launch.
@@ -907,6 +910,10 @@ public class MainActivity extends AppCompatActivity {
 
             cycloneStatus(getString(R.string.cyclone_setup_prefix));
             if (winePrefix == null) winePrefix = "default";
+            // Re-run setSharedVars now that SELECTED_CORE is set by installRat — this
+            // (re)creates the `usr` -> Core symlink the X server's TMPDIR depends on.
+            // Without it, winex11 can't reach the display ("graphics driver missing").
+            setSharedVars(this);
             addGameToList(getString(R.string.desktop_mode_init), getString(R.string.desktop_mode_init), "");
             java.util.List<RatPackageManager.RatPackage> winePackages = listRatPackages("Wine");
             if (winePackages.isEmpty()) return false;
