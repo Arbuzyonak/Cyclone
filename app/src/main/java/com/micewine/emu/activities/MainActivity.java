@@ -822,15 +822,21 @@ public class MainActivity extends AppCompatActivity {
             // needs) before launching, in case a prior provision left it stale.
             setSharedVars(this);
 
-            // Start the X server and WAIT until it's accepting connections. Cyclone
-            // launches automatically, so without this the game's wineboot/explorer
-            // races ahead of the X server and fails ("graphics driver missing").
-            runOnUiThread(this::runXServer);
+            // Start the X server FRESH and WAIT until it's actually accepting
+            // connections. Cyclone launches automatically, so without this the game's
+            // wineboot/explorer races ahead of the X server and fails ("graphics driver
+            // missing"). Delete any stale socket/lock first so we detect the REAL new one.
             File xSocket = new File(tmpDir, ".X11-unix/X0");
-            for (int i = 0; i < 100 && !xSocket.exists(); i++) {
+            runCommand("rm -f " + tmpDir + "/.X11-unix/X0 " + tmpDir + "/.X0-lock", false);
+            runCommand("pkill -9 -f CmdEntryPoint", false);
+            runningXServer = false;
+            try { Thread.sleep(300); } catch (InterruptedException ignored) {}
+            runOnUiThread(this::runXServer);
+            for (int i = 0; i < 150 && !xSocket.exists(); i++) {
                 try { Thread.sleep(100); } catch (InterruptedException ignored) {}
             }
-            android.util.Log.i("CycloneFlow", "X server ready=" + xSocket.exists() + " after wait");
+            try { Thread.sleep(800); } catch (InterruptedException ignored) {} // let it finish binding
+            android.util.Log.i("CycloneFlow", "X server socket=" + xSocket.exists() + " after fresh start");
 
             // Seed the "Vortex" entry on first run (GameItem ctor picks valid installed
             // driver/dxvk IDs); refresh its arguments with the fresh play URI each launch.
