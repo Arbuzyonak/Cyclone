@@ -667,6 +667,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void runWine(String exePath, String exeArguments) {
+        if (exePath == null) exePath = "";
+        if (exeArguments == null) exeArguments = "";
         installDXWrapper(winePrefix);
 
         boolean changedDpi = !(preferences.getBoolean(WINE_DPI_APPLIED, WINE_DPI_APPLIED_DEFAULT_VALUE));
