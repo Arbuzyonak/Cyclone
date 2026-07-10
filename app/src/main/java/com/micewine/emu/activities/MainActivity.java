@@ -859,15 +859,20 @@ public class MainActivity extends AppCompatActivity {
             java.util.List<RatDownloaderFragment.RepoRatPackage> all = RatDownloaderFragment.fetchPackages();
             if (all.isEmpty()) return false;
 
+            // fetchPackages() already filters to this device's arch (aarch64) + "any" + Wine,
+            // so no arch excludes are needed here.
             java.util.List<RatDownloaderFragment.RepoRatPackage> sel = new java.util.ArrayList<>();
-            addPkg(sel, all, "MiceWine-Core", "aarch64");
+            addPkg(sel, all, "MiceWine-Core", null);
             addPkg(sel, all, "box64-0.4.0", null);
             addPkg(sel, all, "wine-10.10", null);
-            addPkg(sel, all, "mesa-vulkan-freedreno-25.1.4", null);   // Turnip
-            addPkg(sel, all, "mesa-vulkan-wrapper-25.1.4", "adrenotools"); // Wrapper (exclude adrenotools)
+            addPkg(sel, all, "mesa-vulkan-freedreno-25.1.4", null);       // Turnip
+            addPkg(sel, all, "mesa-vulkan-wrapper-25.1.4", "adrenotools"); // Wrapper
             addPkg(sel, all, "DXVK-1.9.4-any", null);
             addPkg(sel, all, "WineD3D-10.0-any", null);
             addPkg(sel, all, "VKD3D-2.8-any", null);
+
+            // Every required component must resolve to a package.
+            if (sel.size() < 8) return false;
 
             SetupFragment.ProgressCallback installCb = new SetupFragment.ProgressCallback() {
                 public void onProgressChanged(int progress) { cycloneProgress(progress); }
