@@ -883,8 +883,36 @@ public class MainActivity extends AppCompatActivity {
 
             android.util.Log.i("CycloneFlow", "launching Vortex");
             cycloneStatus(getString(R.string.cyclone_setup_launching));
-            runOnUiThread(() -> launchNamedGame("Vortex", exeArgs));
+            String freshArgs = cycloneFreshPlayUri(exeArgs, sessionToken);
+            final String launchArgs = freshArgs != null ? freshArgs : exeArgs;
+            runOnUiThread(() -> launchNamedGame("Vortex", launchArgs));
         }).start();
+    }
+
+    private String cycloneFreshPlayUri(String exeArgs, String sessionToken) {
+        if (exeArgs == null || sessionToken == null || sessionToken.isEmpty()) return null;
+        java.util.regex.Matcher gm = java.util.regex.Pattern.compile("game=(\\d+)").matcher(exeArgs);
+        if (!gm.find()) return null;
+        String gameId = gm.group(1);
+        try {
+            okhttp3.OkHttpClient client = new okhttp3.OkHttpClient();
+            okhttp3.Request req = new okhttp3.Request.Builder()
+                    .url("https://playvortex.io/games/" + gameId + "/play")
+                    .header("Cookie", "session_token=" + sessionToken)
+                    .build();
+            try (okhttp3.Response resp = client.newCall(req).execute()) {
+                if (!resp.isSuccessful() || resp.body() == null) return null;
+                String body = resp.body().string();
+                java.util.regex.Matcher um = java.util.regex.Pattern.compile("vortex://[^\"'\\s\\\\<>]+").matcher(body);
+                if (!um.find()) return null;
+                String uri = um.group().replace("&amp;", "&");
+                android.util.Log.i("CycloneFlow", "minted fresh play uri for game " + gameId);
+                return "'" + uri + "'";
+            }
+        } catch (Exception e) {
+            android.util.Log.e("CycloneFlow", "fresh play uri fetch failed: " + e);
+            return null;
+        }
     }
 
     private void cycloneStartXServer() {
