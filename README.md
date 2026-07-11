@@ -12,20 +12,16 @@ Cyclone is an unofficial Android client for [Vortex](https://playvortex.io). The
 
 You just log in on the site like you normally would, tap Play, and the game launches fullscreen with touch controls.
 
-## What you get
-
-- The normal playvortex.io experience (login, avatar, your game library) in-app
-- One tap to play, no setup screens. The first launch downloads everything it needs
+## Current Features
 - Touch controls: tap to click, drag to move the camera, on-screen buttons for moving, jumping and shift lock
-- A chat button that opens the in-game chat and brings up your keyboard
-- A menu button that drops you back to your library when you're done
+- A chat button
+- A menu button
 
 ## Requirements
 
 - An ARM64 phone on Android 9 or newer
 - A Snapdragon chip with an Adreno GPU is strongly recommended. Developed and tested on a Galaxy S23+ (Snapdragon 8 Gen 2 / Adreno 740)
 - Around 5 GB of free storage
-- A Vortex account
 
 ## Installing
 
@@ -33,6 +29,7 @@ You just log in on the site like you normally would, tap Play, and the game laun
 2. Open it. Android will ask you to allow installs from your browser or file manager, allow it
 3. Open Cyclone and log into your account
 4. Pick a game and hit Play
+5. Ignore the file not found error when launching
 
 The first launch takes a while: it downloads the runtime (about 400 MB) and the game itself, then starts. Every launch after that goes straight into the game. Keep the phone plugged in for long sessions, translation is heavy and the phone will get warm.
 
@@ -45,8 +42,8 @@ The first launch takes a while: it downloads the runtime (about 400 MB) and the 
 | W / S | Move forward / back |
 | Space | Jump |
 | LShift | Shift lock |
-| Chat | Opens chat and the keyboard (Enter sends and closes it) |
-| Menu | Leave the game, back to your library |
+| Chat | Opens chat |
+| Menu | Leave the game |
 
 ## Building from source
 
@@ -66,7 +63,7 @@ Cyclone stands on a lot of other people's work:
 
 - [MiceWine](https://github.com/KreitinnSoftware/MiceWine-Application) - the Android Wine runtime this project is forked from (MIT)
 - [Wine](https://www.winehq.org/), [Box64](https://github.com/ptitSeb/box64), [DXVK](https://github.com/doitsujin/dxvk), [vkd3d-proton](https://github.com/HansKristian-Work/vkd3d-proton) and [Mesa/Turnip](https://mesa3d.org/)
-
+- Inspired by [Tempest](https://github.com/solomon-gleeson/tempest/blob/master/README.md)
 ## Disclaimer
 
 This is a community project. It is not made, endorsed or supported by Vortex or its developers. You need your own account, and the game is downloaded from the official site through your own login, exactly like the Windows launcher does.
