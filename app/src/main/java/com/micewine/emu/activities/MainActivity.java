@@ -841,6 +841,10 @@ public class MainActivity extends AppCompatActivity {
             vortexEnv.add(new AdapterEnvVar.EnvVar("VORTEX_NO_UPDATE", "1"));
             vortexEnv.add(new AdapterEnvVar.EnvVar("WINEDEBUG", "warn+process"));
             vortexEnv.add(new AdapterEnvVar.EnvVar("RUST_BACKTRACE", "full"));
+            android.content.SharedPreferences cyc = getSharedPreferences("cyclone", MODE_PRIVATE);
+            int fpsCap = cyc.getInt("fpsCap", 60);
+            if (fpsCap > 0)
+                vortexEnv.add(new AdapterEnvVar.EnvVar("DXVK_FRAME_RATE", String.valueOf(fpsCap)));
             ShortcutsFragment.putEnvVars("Vortex", vortexEnv);
 
             if (preferences != null) {
@@ -852,7 +856,8 @@ public class MainActivity extends AppCompatActivity {
                         .apply();
             }
 
-            putDisplaySettings("Vortex", "16:9", "1280x720");
+            String renderRes = cyc.getInt("renderHeight", 720) >= 1080 ? "1920x1080" : "1280x720";
+            putDisplaySettings("Vortex", "16:9", renderRes);
             ShortcutsFragment.putWineVirtualDesktop("Vortex", false);
 
             String nativeRes = getNativeResolution(this);
@@ -865,6 +870,16 @@ public class MainActivity extends AppCompatActivity {
             vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.81F, nh * 0.55F, small, "LShift", VirtualKeyboardInputView.SHAPE_CIRCLE));
             vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.81F, nh * 0.73F, small, "Chat", VirtualKeyboardInputView.SHAPE_CIRCLE));
             vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.93F, nh * 0.13F, small, "Menu", VirtualKeyboardInputView.SHAPE_CIRCLE));
+            // Optional buttons, off by default, toggled in the in-game settings panel.
+            if (cyc.getBoolean("btnE", false))
+                vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.90F, nh * 0.58F, small, "E", VirtualKeyboardInputView.SHAPE_CIRCLE));
+            if (cyc.getBoolean("btnR", false))
+                vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.73F, nh * 0.85F, small, "R", VirtualKeyboardInputView.SHAPE_CIRCLE));
+            if (cyc.getBoolean("btnNumbers", false)) {
+                vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.06F, nh * 0.42F, small, "1", VirtualKeyboardInputView.SHAPE_CIRCLE));
+                vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.13F, nh * 0.42F, small, "2", VirtualKeyboardInputView.SHAPE_CIRCLE));
+                vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.20F, nh * 0.42F, small, "3", VirtualKeyboardInputView.SHAPE_CIRCLE));
+            }
             java.util.ArrayList<VirtualKeyboardInputView.VirtualAnalog> vAnalogs = new java.util.ArrayList<>();
             vAnalogs.add(new VirtualKeyboardInputView.VirtualAnalog(
                     nw * 0.12F, nh * 0.72F, nh * 0.34F, "W", "S", "A", "D", 0.35F));

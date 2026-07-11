@@ -101,6 +101,80 @@ public class EmulationActivity extends AppCompatActivity implements View.OnApply
         startActivity(intent);
     }
 
+    public void openCycloneSettings() {
+        android.content.SharedPreferences sp = getSharedPreferences("cyclone", MODE_PRIVATE);
+        View v = getLayoutInflater().inflate(R.layout.cyclone_settings, null);
+
+        // Framerate (applies next launch via DXVK_FRAME_RATE)
+        int fps = sp.getInt("fpsCap", 60);
+        ((android.widget.RadioButton) v.findViewById(
+                fps == 30 ? R.id.fps_30 : fps == 45 ? R.id.fps_45 : fps == 0 ? R.id.fps_0 : R.id.fps_60)).setChecked(true);
+        ((android.widget.RadioGroup) v.findViewById(R.id.rg_fps)).setOnCheckedChangeListener((g, id) -> {
+            int val = id == R.id.fps_30 ? 30 : id == R.id.fps_45 ? 45 : id == R.id.fps_0 ? 0 : 60;
+            sp.edit().putInt("fpsCap", val).apply();
+        });
+
+        // Camera sensitivity (live)
+        android.widget.TextView lblSens = v.findViewById(R.id.lbl_sens);
+        android.widget.SeekBar sbSens = v.findViewById(R.id.sb_sens);
+        int sens = sp.getInt("camSensitivity", 100);
+        sbSens.setProgress(Math.max(0, sens - 10));
+        lblSens.setText("Camera sensitivity: " + sens + "%");
+        sbSens.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+            public void onProgressChanged(android.widget.SeekBar s, int p, boolean u) {
+                int val = p + 10;
+                lblSens.setText("Camera sensitivity: " + val + "%");
+                VirtualKeyboardInputView.cameraSensitivity = val / 100F;
+                sp.edit().putInt("camSensitivity", val).apply();
+            }
+            public void onStartTrackingTouch(android.widget.SeekBar s) {}
+            public void onStopTrackingTouch(android.widget.SeekBar s) {}
+        });
+
+        // Music volume (live, Android media stream)
+        android.media.AudioManager am = (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
+        int maxVol = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC);
+        android.widget.SeekBar sbVol = v.findViewById(R.id.sb_vol);
+        sbVol.setProgress(maxVol > 0 ? am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) * 100 / maxVol : 0);
+        sbVol.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+            public void onProgressChanged(android.widget.SeekBar s, int p, boolean u) {
+                if (u) am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, Math.round(p / 100F * maxVol), 0);
+            }
+            public void onStartTrackingTouch(android.widget.SeekBar s) {}
+            public void onStopTrackingTouch(android.widget.SeekBar s) {}
+        });
+
+        // Graphics / render resolution (applies next launch)
+        int rh = sp.getInt("renderHeight", 720);
+        ((android.widget.RadioButton) v.findViewById(rh >= 1080 ? R.id.gfx_1080 : R.id.gfx_720)).setChecked(true);
+        ((android.widget.RadioGroup) v.findViewById(R.id.rg_gfx)).setOnCheckedChangeListener(
+                (g, id) -> sp.edit().putInt("renderHeight", id == R.id.gfx_1080 ? 1080 : 720).apply());
+
+        // Extra buttons (apply next launch, off by default)
+        bindButtonToggle(v, R.id.cb_e, sp, "btnE");
+        bindButtonToggle(v, R.id.cb_r, sp, "btnR");
+        bindButtonToggle(v, R.id.cb_num, sp, "btnNumbers");
+
+        // Temperature
+        android.content.Intent bat = registerReceiver(null,
+                new android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED));
+        int t = bat != null ? bat.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE, -1) : -1;
+        ((android.widget.TextView) v.findViewById(R.id.tv_temp))
+                .setText("Temperature: " + (t > 0 ? (t / 10F) + "°C" : "--"));
+
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Settings")
+                .setView(v)
+                .setPositiveButton("Done", null)
+                .show();
+    }
+
+    private void bindButtonToggle(View root, int id, android.content.SharedPreferences sp, String key) {
+        android.widget.CheckBox cb = root.findViewById(id);
+        cb.setChecked(sp.getBoolean(key, false));
+        cb.setOnCheckedChangeListener((b, checked) -> sp.edit().putBoolean(key, checked).apply());
+    }
+
     public static boolean chatKeyboardOpen = false;
 
     public static Handler handler = new Handler();

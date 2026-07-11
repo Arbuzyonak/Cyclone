@@ -89,6 +89,10 @@ public class VirtualKeyboardInputView extends View {
 
         if (preset == null) return;
 
+        cameraSensitivity = getContext()
+                .getSharedPreferences("cyclone", Context.MODE_PRIVATE)
+                .getInt("camSensitivity", 100) / 100F;
+
         buttonList.clear();
         analogList.clear();
         dpadList.clear();
@@ -359,6 +363,13 @@ public class VirtualKeyboardInputView extends View {
                 int pid = event.getPointerId(index);
                 boolean hit = false;
 
+                // Top-left corner (where the game draws its gear) opens Cyclone's settings.
+                if (event.getX(index) < getWidth() * 0.05F && event.getY(index) < getHeight() * 0.10F
+                        && getContext() instanceof com.micewine.emu.activities.EmulationActivity a) {
+                    a.runOnUiThread(a::openCycloneSettings);
+                    return true;
+                }
+
                 for (VirtualButton i : buttonList) {
                     if (detectClick(event, index, i.x, i.y, i.radius, i.shape)) {
                         i.isPressed = true;
@@ -489,7 +500,7 @@ public class VirtualKeyboardInputView extends View {
                         }
                         if (freeFingerDragging) {
                             float[] s = rootScale();
-                            lorieView.sendMouseEvent((x - freeFingerLastX) * s[0], (y - freeFingerLastY) * s[1], BUTTON_UNDEFINED, false, true);
+                            lorieView.sendMouseEvent((x - freeFingerLastX) * s[0] * cameraSensitivity, (y - freeFingerLastY) * s[1] * cameraSensitivity, BUTTON_UNDEFINED, false, true);
                         }
                         freeFingerLastX = x;
                         freeFingerLastY = y;
@@ -734,6 +745,8 @@ public class VirtualKeyboardInputView extends View {
     public final static ArrayList<VirtualButton> buttonList = new ArrayList<>();
     public final static ArrayList<VirtualAnalog> analogList = new ArrayList<>();
     public final static ArrayList<VirtualDPad> dpadList = new ArrayList<>();
+
+    public static float cameraSensitivity = 1.0F;
 
     public static boolean detectClick(MotionEvent event, int index, float x, float y, float radius, int shape) {
         return switch (shape) {
