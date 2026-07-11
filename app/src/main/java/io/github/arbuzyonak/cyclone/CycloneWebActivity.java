@@ -9,6 +9,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.view.View;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.URLUtil;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -31,6 +32,8 @@ import androidx.core.view.WindowInsetsCompat;
 
 import com.micewine.emu.R;
 
+import java.io.File;
+
 public class CycloneWebActivity extends AppCompatActivity {
 
     private static final String START_URL = "https://playvortex.io/home";
@@ -49,6 +52,7 @@ public class CycloneWebActivity extends AppCompatActivity {
     private View errorView;
     private String lastLoadedUrl = START_URL;
     private ValueCallback<Uri[]> pendingFileCallback;
+    private volatile boolean clientUpdateRunning = false;
 
     private final ActivityResultLauncher<String> filePicker =
         registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
@@ -87,6 +91,8 @@ public class CycloneWebActivity extends AppCompatActivity {
         s.setDomStorageEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
 
+        webView.addJavascriptInterface(new CycloneBridge(), "CycloneBridge");
+
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
@@ -103,6 +109,7 @@ public class CycloneWebActivity extends AppCompatActivity {
                 progressBar.setVisibility(View.GONE);
                 if (errorView.getVisibility() == View.VISIBLE) hideError();
                 injectNavCss(view);
+                injectUpdateButton(view);
             }
 
             @Override
@@ -181,6 +188,9 @@ public class CycloneWebActivity extends AppCompatActivity {
         launch.putExtra("cycloneSessionToken", sessionToken);
         launch.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         startActivity(launch);
+        // Leave the WebView on the home page, not the bare "Launching…/download the app"
+        // page, so returning from the game (Menu button) lands on the main page.
+        webView.post(() -> webView.loadUrl(START_URL));
     }
 
     private String extractSessionToken() {
@@ -208,6 +218,76 @@ public class CycloneWebActivity extends AppCompatActivity {
             "st.textContent=\"" + NAV_OVERRIDE_CSS + "\";" +
             "document.head.appendChild(st);})();";
         view.evaluateJavascript(js, null);
+    }
+
+    private void injectUpdateButton(WebView view) {
+        String js =
+            "(function(){" +
+            "if(document.getElementById('cyclone-update-btn'))return;" +
+            "var root=document.querySelector('.navbar-actions')||document;" +
+            "var els=root.querySelectorAll('a,button');" +
+            "var settings=null;" +
+            "for(var i=0;i<els.length;i++){if(els[i].textContent.trim()==='Settings'){settings=els[i];break;}}" +
+            "if(!settings)return;" +
+            "var b=settings.cloneNode(false);" +
+            "b.id='cyclone-update-btn';" +
+            "b.removeAttribute('href');" +
+            "b.textContent='Update';" +
+            "b.style.cursor='pointer';" +
+            "b.addEventListener('click',function(e){e.preventDefault();CycloneBridge.updateClient();});" +
+            "settings.parentNode.insertBefore(b,settings.nextSibling);})();";
+        view.evaluateJavascript(js, null);
+    }
+
+    private void setUpdateButtonLabel(String label) {
+        String js =
+            "(function(){var b=document.getElementById('cyclone-update-btn');" +
+            "if(b)b.textContent='" + label + "';})();";
+        webView.evaluateJavascript(js, null);
+    }
+
+    private class CycloneBridge {
+        @JavascriptInterface
+        public void updateClient() {
+            if (clientUpdateRunning) return;
+            clientUpdateRunning = true;
+            runOnUiThread(() -> {
+                setUpdateButtonLabel("Updating…");
+                Toast.makeText(CycloneWebActivity.this, R.string.cyclone_update_started, Toast.LENGTH_SHORT).show();
+            });
+            new Thread(this::doUpdate).start();
+        }
+
+        private void doUpdate() {
+            String token = extractSessionToken();
+            boolean anyPrefix = false;
+            boolean ok = true;
+            File[] prefixes = com.micewine.emu.activities.MainActivity.winePrefixesDir.listFiles();
+            if (prefixes != null) {
+                for (File prefix : prefixes) {
+                    if (!prefix.isDirectory()) continue;
+                    File gameDir = new File(prefix, "drive_c/Vortex");
+                    if (!gameDir.getParentFile().exists()) continue;
+                    anyPrefix = true;
+                    File exe = new File(gameDir, "Vortex.exe");
+                    // downloadVortexExe guards against downgrades: it keeps the installed
+                    // build unless the download is strictly newer, so this never reverts a
+                    // manually-installed newer client to the stale /download/windows base.
+                    if (!com.micewine.emu.activities.MainActivity.downloadVortexExe(exe, token)) {
+                        ok = false;
+                    }
+                }
+            }
+            final boolean downloaded = ok && anyPrefix;
+            final boolean nothingToUpdate = !anyPrefix;
+            runOnUiThread(() -> {
+                setUpdateButtonLabel("Update");
+                int msg = nothingToUpdate ? R.string.cyclone_update_nothing
+                        : downloaded ? R.string.cyclone_update_done : R.string.cyclone_update_failed;
+                Toast.makeText(CycloneWebActivity.this, msg, Toast.LENGTH_LONG).show();
+            });
+            clientUpdateRunning = false;
+        }
     }
 
     private void showError() {

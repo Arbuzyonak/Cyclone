@@ -838,6 +838,9 @@ public class MainActivity extends AppCompatActivity {
             vortexEnv.add(new AdapterEnvVar.EnvVar("BOX64_DYNAREC_CALLRET", "0"));
             vortexEnv.add(new AdapterEnvVar.EnvVar("BOX64_DYNAREC_STRONGMEM", "1"));
             vortexEnv.add(new AdapterEnvVar.EnvVar("BOX64_DYNAREC_SAFEFLAGS", "2"));
+            vortexEnv.add(new AdapterEnvVar.EnvVar("VORTEX_NO_UPDATE", "1"));
+            vortexEnv.add(new AdapterEnvVar.EnvVar("WINEDEBUG", "warn+process"));
+            vortexEnv.add(new AdapterEnvVar.EnvVar("RUST_BACKTRACE", "full"));
             ShortcutsFragment.putEnvVars("Vortex", vortexEnv);
 
             if (preferences != null) {
@@ -858,16 +861,19 @@ public class MainActivity extends AppCompatActivity {
             float big = nh * 0.20F;
             float small = nh * 0.14F;
             java.util.ArrayList<VirtualKeyboardInputView.VirtualButton> vButtons = new java.util.ArrayList<>();
-            vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.10F, nh * 0.58F, big, "W", VirtualKeyboardInputView.SHAPE_CIRCLE));
-            vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.10F, nh * 0.84F, big, "S", VirtualKeyboardInputView.SHAPE_CIRCLE));
             vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.90F, nh * 0.80F, big, "Space", VirtualKeyboardInputView.SHAPE_CIRCLE));
             vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.81F, nh * 0.55F, small, "LShift", VirtualKeyboardInputView.SHAPE_CIRCLE));
             vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.81F, nh * 0.73F, small, "Chat", VirtualKeyboardInputView.SHAPE_CIRCLE));
             vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.93F, nh * 0.13F, small, "Menu", VirtualKeyboardInputView.SHAPE_CIRCLE));
+            java.util.ArrayList<VirtualKeyboardInputView.VirtualAnalog> vAnalogs = new java.util.ArrayList<>();
+            vAnalogs.add(new VirtualKeyboardInputView.VirtualAnalog(
+                    nw * 0.12F, nh * 0.72F, nh * 0.34F, "W", "S", "A", "D", 0.35F));
             VirtualControllerPresetManagerFragment.putOrCreateVirtualControllerPreset(
-                    "Cyclone", nativeRes, vButtons, new java.util.ArrayList<>(), new java.util.ArrayList<>());
+                    "Cyclone", nativeRes, vButtons, vAnalogs, new java.util.ArrayList<>());
             ShortcutsFragment.putSelectedVirtualControllerPreset("Vortex", "Cyclone");
             ShortcutsFragment.putVirtualControllerXInput("Vortex", false);
+
+            cycloneEnsureLocalAppData();
 
             File exe = new File(winePrefixesDir, winePrefix + "/drive_c/Vortex/Vortex.exe");
             android.util.Log.i("CycloneFlow", "vortex.exe path=" + exe.getPath() + " exists=" + exe.exists() + " len=" + (exe.exists() ? exe.length() : -1));
@@ -1037,46 +1043,140 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    private boolean downloadVortexExe(File dest, String sessionToken) {
+    private void cycloneEnsureLocalAppData() {
+        try {
+            File userDir = new File(winePrefixesDir, winePrefix + "/drive_c/users/" + unixUsername);
+            File appData = new File(userDir, "AppData");
+            boolean symlink = java.nio.file.Files.isSymbolicLink(appData.toPath());
+            if (symlink || !appData.isDirectory()) {
+                if (symlink) //noinspection ResultOfMethodCallIgnored
+                    appData.delete(); // removes the symlink, not its target
+                String[] dirs = {
+                        "Local/Temp", "Local/Vortex/logs",
+                        "Local/Microsoft/Windows/History", "Local/Microsoft/Windows/INetCache",
+                        "Local/Microsoft/Windows/INetCookies", "LocalLow",
+                        "Roaming/Microsoft/Windows/Recent"
+                };
+                for (String d : dirs) //noinspection ResultOfMethodCallIgnored
+                    new File(appData, d).mkdirs();
+                android.util.Log.i("CycloneFlow", "AppData localized at " + appData);
+            }
+        } catch (Exception e) {
+            android.util.Log.e("CycloneFlow", "AppData localize failed: " + e);
+        }
+    }
+
+    // Vortex version encoded as major*1_000_000 + minor*1000 + patch, or -1 if the
+    // binary carries no "Vortex vX.Y.Z" marker (the stale self-updating base has none).
+    private static long readExeVersion(File f) {
+        final byte[] marker = {'V', 'o', 'r', 't', 'e', 'x', ' ', 'v'};
+        byte[] buf = new byte[1 << 16];
+        int m = 0;
+        boolean capturing = false;
+        StringBuilder ver = new StringBuilder();
+        try (java.io.InputStream in = new java.io.FileInputStream(f)) {
+            int n;
+            while ((n = in.read(buf)) != -1) {
+                for (int i = 0; i < n; i++) {
+                    int b = buf[i] & 0xFF;
+                    if (capturing) {
+                        if ((b >= '0' && b <= '9') || b == '.') {
+                            ver.append((char) b);
+                            if (ver.length() > 12) { capturing = false; ver.setLength(0); m = 0; }
+                        } else {
+                            long v = parseVer(ver.toString());
+                            if (v >= 0) return v;
+                            capturing = false; ver.setLength(0); m = 0;
+                        }
+                    } else if (b == (marker[m] & 0xFF)) {
+                        m++;
+                        if (m == marker.length) { capturing = true; ver.setLength(0); }
+                    } else {
+                        m = (b == (marker[0] & 0xFF)) ? 1 : 0;
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return -1;
+    }
+
+    private static long parseVer(String s) {
+        java.util.regex.Matcher mm = java.util.regex.Pattern.compile("(\\d+)\\.(\\d+)\\.(\\d+)").matcher(s);
+        if (mm.find())
+            return Long.parseLong(mm.group(1)) * 1_000_000L + Long.parseLong(mm.group(2)) * 1000L + Long.parseLong(mm.group(3));
+        return -1;
+    }
+
+    public static boolean downloadVortexExe(File dest, String sessionToken) {
+        File tmp = new File(dest.getParentFile(), "Vortex.exe.dl");
         try {
             //noinspection ResultOfMethodCallIgnored
             dest.getParentFile().mkdirs();
+            //noinspection ResultOfMethodCallIgnored
+            tmp.delete();
             okhttp3.OkHttpClient client = new okhttp3.OkHttpClient();
             okhttp3.Request.Builder rb = new okhttp3.Request.Builder()
                     .url("https://playvortex.io/download/windows");
             if (sessionToken != null && !sessionToken.isEmpty()) {
                 rb.header("Cookie", "session_token=" + sessionToken);
             }
+            boolean extracted = false;
             try (okhttp3.Response resp = client.newCall(rb.build()).execute()) {
                 android.util.Log.i("CycloneFlow", "vortex download HTTP " + resp.code()
-                        + " ctype=" + (resp.body() != null ? resp.body().contentType() : "null")
-                        + " clen=" + (resp.body() != null ? resp.body().contentLength() : -1)
                         + " hasToken=" + (sessionToken != null && !sessionToken.isEmpty()));
-                if (!resp.isSuccessful() || resp.body() == null) return false;
+                if (!resp.isSuccessful() || resp.body() == null)
+                    return dest.exists() && dest.length() > 1024;
                 java.util.zip.ZipInputStream zis =
                         new java.util.zip.ZipInputStream(resp.body().byteStream());
                 java.util.zip.ZipEntry entry;
                 while ((entry = zis.getNextEntry()) != null) {
                     String n = entry.getName().toLowerCase();
-                    android.util.Log.i("CycloneFlow", "zip entry: " + entry.getName());
                     if (!entry.isDirectory() && n.endsWith(".exe") && n.contains("vortex")) {
-                        try (java.io.OutputStream out = new java.io.FileOutputStream(dest)) {
+                        try (java.io.OutputStream out = new java.io.FileOutputStream(tmp)) {
                             byte[] buf = new byte[8192];
                             int r;
                             while ((r = zis.read(buf)) != -1) out.write(buf, 0, r);
                         }
                         zis.closeEntry();
-                        android.util.Log.i("CycloneFlow", "extracted vortex.exe len=" + dest.length());
-                        return dest.exists() && dest.length() > 1024;
+                        extracted = tmp.exists() && tmp.length() > 1024;
+                        break;
                     }
                     zis.closeEntry();
                 }
-                android.util.Log.e("CycloneFlow", "no vortex .exe found in zip");
             }
+            if (!extracted) {
+                //noinspection ResultOfMethodCallIgnored
+                tmp.delete();
+                android.util.Log.e("CycloneFlow", "no vortex .exe extracted");
+                return dest.exists() && dest.length() > 1024;
+            }
+            // Never downgrade: keep whichever build is newer. The public /download/windows
+            // serves an old self-updating base with no version marker (reads as -1), so an
+            // installed real client (e.g. 0.2.13) is always preserved over it.
+            if (!dest.exists()) {
+                boolean ok = tmp.renameTo(dest);
+                android.util.Log.i("CycloneFlow", "installed vortex.exe (fresh)");
+                return ok && dest.exists();
+            }
+            long vTmp = readExeVersion(tmp), vDest = readExeVersion(dest);
+            if (vTmp > vDest) {
+                //noinspection ResultOfMethodCallIgnored
+                dest.delete();
+                boolean ok = tmp.renameTo(dest);
+                android.util.Log.i("CycloneFlow", "vortex.exe upgraded v" + vDest + " -> v" + vTmp);
+                return ok && dest.exists();
+            }
+            //noinspection ResultOfMethodCallIgnored
+            tmp.delete();
+            android.util.Log.i("CycloneFlow", "kept existing vortex.exe (v" + vDest + " >= downloaded v" + vTmp + ")");
+            return true;
         } catch (Exception e) {
             android.util.Log.e("CycloneFlow", "download exception: " + e);
+            //noinspection ResultOfMethodCallIgnored
+            tmp.delete();
+            return dest.exists() && dest.length() > 1024;
         }
-        return false;
     }
 
     private void launchNamedGame(String name, String overrideArgs) {

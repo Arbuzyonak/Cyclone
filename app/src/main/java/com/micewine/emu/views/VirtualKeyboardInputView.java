@@ -277,6 +277,19 @@ public class VirtualKeyboardInputView extends View {
     private long freeFingerDownTime;
     private static final long TAP_MAX_MS = 300L;
 
+    // Two-finger pinch -> mouse wheel (camera zoom, Roblox-style).
+    private int freeFingerId2 = -1;
+    private boolean pinching = false;
+    private float pinchLastDist = -1F, pinchAccum = 0F;
+    private static final float PINCH_WHEEL_STEP = 45F; // px of spread per wheel tick
+
+    private float pinchDist(MotionEvent event) {
+        int i1 = event.findPointerIndex(freeFingerId);
+        int i2 = event.findPointerIndex(freeFingerId2);
+        if (i1 < 0 || i2 < 0) return -1F;
+        return (float) Math.hypot(event.getX(i1) - event.getX(i2), event.getY(i1) - event.getY(i2));
+    }
+
     private float[] rootScale() {
         float sx = 1F, sy = 1F;
         try {
@@ -331,6 +344,10 @@ public class VirtualKeyboardInputView extends View {
             lorieView.sendMouseEvent(0F, 0F, BUTTON_RIGHT, false, true);
         freeFingerId = -1;
         freeFingerDragging = false;
+        freeFingerId2 = -1;
+        pinching = false;
+        pinchLastDist = -1F;
+        pinchAccum = 0F;
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -386,17 +403,45 @@ public class VirtualKeyboardInputView extends View {
                     }
                 }
 
-                if (!hit && freeFingerId == -1) {
-                    freeFingerId = pid;
-                    freeFingerDragging = false;
-                    freeFingerDownX = freeFingerLastX = event.getX(index);
-                    freeFingerDownY = freeFingerLastY = event.getY(index);
-                    freeFingerDownTime = event.getEventTime();
+                if (!hit) {
+                    if (freeFingerId == -1) {
+                        freeFingerId = pid;
+                        freeFingerDragging = false;
+                        freeFingerDownX = freeFingerLastX = event.getX(index);
+                        freeFingerDownY = freeFingerLastY = event.getY(index);
+                        freeFingerDownTime = event.getEventTime();
+                    } else if (freeFingerId2 == -1) {
+                        // second free finger -> start a pinch, stop any camera drag
+                        freeFingerId2 = pid;
+                        if (freeFingerDragging) {
+                            lorieView.sendMouseEvent(0F, 0F, BUTTON_RIGHT, false, true);
+                            freeFingerDragging = false;
+                        }
+                        pinching = true;
+                        pinchLastDist = pinchDist(event);
+                        pinchAccum = 0F;
+                    }
                 }
 
                 invalidate();
             }
             case MotionEvent.ACTION_MOVE -> {
+                if (pinching && freeFingerId != -1 && freeFingerId2 != -1) {
+                    float d = pinchDist(event);
+                    if (d >= 0 && pinchLastDist >= 0) {
+                        pinchAccum += (d - pinchLastDist);
+                        while (pinchAccum >= PINCH_WHEEL_STEP) {
+                            lorieView.sendMouseWheelEvent(0F, -100F); // spread -> zoom in
+                            pinchAccum -= PINCH_WHEEL_STEP;
+                        }
+                        while (pinchAccum <= -PINCH_WHEEL_STEP) {
+                            lorieView.sendMouseWheelEvent(0F, 100F); // pinch -> zoom out
+                            pinchAccum += PINCH_WHEEL_STEP;
+                        }
+                    }
+                    pinchLastDist = d;
+                }
+
                 for (int i = 0; i < event.getPointerCount(); i++) {
                     int pid = event.getPointerId(i);
 
@@ -433,7 +478,7 @@ public class VirtualKeyboardInputView extends View {
                         }
                     }
 
-                    if (pid == freeFingerId) {
+                    if (pid == freeFingerId && !pinching) {
                         float x = event.getX(i);
                         float y = event.getY(i);
 
@@ -454,7 +499,17 @@ public class VirtualKeyboardInputView extends View {
                 invalidate();
             }
             case MotionEvent.ACTION_POINTER_UP -> {
-                if (event.getPointerId(event.getActionIndex()) == freeFingerId)
+                int upPid = event.getPointerId(event.getActionIndex());
+                if (pinching && (upPid == freeFingerId || upPid == freeFingerId2)) {
+                    pinching = false;
+                    freeFingerId = -1;
+                    freeFingerId2 = -1;
+                    pinchLastDist = -1F;
+                    pinchAccum = 0F;
+                    invalidate();
+                    return true; // consumed the pinch gesture; no click/camera on release
+                }
+                if (upPid == freeFingerId)
                     finishFreeFinger(event, event.getActionIndex());
                 for (VirtualButton button : buttonList) {
                     if (button.fingerId == event.getPointerId(event.getActionIndex())) {
@@ -488,6 +543,10 @@ public class VirtualKeyboardInputView extends View {
                 invalidate();
             }
             case MotionEvent.ACTION_UP -> {
+                pinching = false;
+                freeFingerId2 = -1;
+                pinchLastDist = -1F;
+                pinchAccum = 0F;
                 if (freeFingerId != -1)
                     finishFreeFinger(event, event.getActionIndex());
                 for (VirtualButton button : buttonList) {

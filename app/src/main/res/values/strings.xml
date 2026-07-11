@@ -283,4 +283,8 @@
     <string name="cyclone_setup_prefix" translatable="false">Preparing Windows environment…</string>
     <string name="cyclone_setup_game" translatable="false">Downloading Vortex…</string>
     <string name="cyclone_setup_launching" translatable="false">Launching…</string>
+    <string name="cyclone_update_started" translatable="false">Updating game client…</string>
+    <string name="cyclone_update_done" translatable="false">Game client is up to date.</string>
+    <string name="cyclone_update_failed" translatable="false">Update failed. Check your connection and try again.</string>
+    <string name="cyclone_update_nothing" translatable="false">Nothing to update yet — the client downloads on first Play.</string>
 </resources>
