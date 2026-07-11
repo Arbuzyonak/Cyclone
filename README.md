@@ -13,9 +13,11 @@ Cyclone is an unofficial Android client for [Vortex](https://playvortex.io). The
 You just log in on the site like you normally would, tap Play, and the game launches fullscreen with touch controls.
 
 ## Current Features
-- Touch controls: tap to click, drag to move the camera, on-screen buttons for moving, jumping and shift lock
+- Touch controls: tap to click, drag to move the camera, on-screen joystick for moving, jumping and shift lock
 - A chat button
 - A menu button
+- Custom settings
+- keybinds
 
 ## Requirements
 
@@ -39,7 +41,7 @@ The first launch takes a while: it downloads the runtime (about 400 MB) and the 
 |---|---|
 | Tap | Left click |
 | Drag | Rotate camera |
-| W / S | Move forward / back |
+| Joystick | Move forward / back |
 | Space | Jump |
 | LShift | Shift lock |
 | Chat | Opens chat |
