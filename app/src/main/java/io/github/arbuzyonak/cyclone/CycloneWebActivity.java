@@ -180,6 +180,23 @@ public class CycloneWebActivity extends AppCompatActivity {
     }
 
     private void onVortexUri(Uri uri) {
+        android.content.SharedPreferences sp = getSharedPreferences("cyclone", MODE_PRIVATE);
+        if (!sp.getBoolean("firstLaunchHintShown", false)) {
+            sp.edit().putBoolean("firstLaunchHintShown", true).apply();
+            new android.app.AlertDialog.Builder(this)
+                    .setTitle("First launch")
+                    .setMessage("The first time you play, Vortex may ask you to sign in from a "
+                            + "browser instead of joining. If that happens, press Menu to leave, "
+                            + "then tap Play again — it joins the second time.")
+                    .setCancelable(false)
+                    .setPositiveButton("Play", (d, w) -> doLaunch(uri))
+                    .show();
+            return;
+        }
+        doLaunch(uri);
+    }
+
+    private void doLaunch(Uri uri) {
         String singleQuoted = "'" + uri.toString() + "'";
         String sessionToken = extractSessionToken();
         Intent launch = new Intent(this, com.micewine.emu.activities.MainActivity.class);
