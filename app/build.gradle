@@ -8,6 +8,10 @@ android {
     compileSdk 35
     ndkVersion "26.1.10909125"
 
+    aaptOptions {
+        noCompress 'exe'
+    }
+
     defaultConfig {
         applicationId "com.micewine.emu"
         minSdk 28

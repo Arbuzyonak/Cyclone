@@ -876,13 +876,13 @@ public class MainActivity extends AppCompatActivity {
             cycloneEnsureLocalAppData();
 
             File exe = new File(winePrefixesDir, winePrefix + "/drive_c/Vortex/Vortex.exe");
+            cycloneStatus(getString(R.string.cyclone_setup_game));
+            cycloneInstallBundledExe(exe);
             android.util.Log.i("CycloneFlow", "vortex.exe path=" + exe.getPath() + " exists=" + exe.exists() + " len=" + (exe.exists() ? exe.length() : -1));
             if (!exe.exists() || exe.length() < 1024) {
-                cycloneStatus(getString(R.string.cyclone_setup_game));
-                boolean ok = downloadVortexExe(exe, sessionToken);
-                android.util.Log.i("CycloneFlow", "downloadVortexExe result=" + ok + " len=" + (exe.exists() ? exe.length() : -1));
-                if (!ok) {
-                    cycloneFail("Couldn't download Vortex. Make sure you're signed in.");
+                // fallback if the bundled copy somehow didn't install
+                if (!downloadVortexExe(exe, sessionToken)) {
+                    cycloneFail("Couldn't install Vortex.");
                     return;
                 }
             }
@@ -1108,6 +1108,56 @@ public class MainActivity extends AppCompatActivity {
         return -1;
     }
 
+    // Install `tmp` over `dest` only when it is a newer build, so nothing ever downgrades
+    // the client. The old /download/windows base has no "Vortex vX.Y.Z" marker (-1), so a
+    // real installed build always wins over it.
+    private static boolean replaceIfNewer(File tmp, File dest) {
+        if (tmp == null || !tmp.exists() || tmp.length() < 1024) {
+            if (tmp != null) //noinspection ResultOfMethodCallIgnored
+                tmp.delete();
+            return dest.exists() && dest.length() > 1024;
+        }
+        if (!dest.exists()) {
+            boolean ok = tmp.renameTo(dest);
+            android.util.Log.i("CycloneFlow", "installed vortex.exe (fresh)");
+            return ok && dest.exists();
+        }
+        long vTmp = readExeVersion(tmp), vDest = readExeVersion(dest);
+        if (vTmp > vDest) {
+            //noinspection ResultOfMethodCallIgnored
+            dest.delete();
+            boolean ok = tmp.renameTo(dest);
+            android.util.Log.i("CycloneFlow", "vortex.exe upgraded v" + vDest + " -> v" + vTmp);
+            return ok && dest.exists();
+        }
+        //noinspection ResultOfMethodCallIgnored
+        tmp.delete();
+        android.util.Log.i("CycloneFlow", "kept existing vortex.exe (v" + vDest + " >= v" + vTmp + ")");
+        return true;
+    }
+
+    // Primary source: the Vortex.exe shipped inside the APK (assets/Vortex.exe).
+    private void cycloneInstallBundledExe(File dest) {
+        File tmp = new File(dest.getParentFile(), "Vortex.exe.bundle");
+        try {
+            //noinspection ResultOfMethodCallIgnored
+            dest.getParentFile().mkdirs();
+            //noinspection ResultOfMethodCallIgnored
+            tmp.delete();
+            try (java.io.InputStream in = getAssets().open("Vortex.exe");
+                 java.io.OutputStream out = new java.io.FileOutputStream(tmp)) {
+                byte[] buf = new byte[1 << 16];
+                int r;
+                while ((r = in.read(buf)) != -1) out.write(buf, 0, r);
+            }
+            replaceIfNewer(tmp, dest);
+        } catch (Exception e) {
+            android.util.Log.e("CycloneFlow", "bundled exe install failed: " + e);
+            //noinspection ResultOfMethodCallIgnored
+            tmp.delete();
+        }
+    }
+
     public static boolean downloadVortexExe(File dest, String sessionToken) {
         File tmp = new File(dest.getParentFile(), "Vortex.exe.dl");
         try {
@@ -1151,26 +1201,7 @@ public class MainActivity extends AppCompatActivity {
                 android.util.Log.e("CycloneFlow", "no vortex .exe extracted");
                 return dest.exists() && dest.length() > 1024;
             }
-            // Never downgrade: keep whichever build is newer. The public /download/windows
-            // serves an old self-updating base with no version marker (reads as -1), so an
-            // installed real client (e.g. 0.2.13) is always preserved over it.
-            if (!dest.exists()) {
-                boolean ok = tmp.renameTo(dest);
-                android.util.Log.i("CycloneFlow", "installed vortex.exe (fresh)");
-                return ok && dest.exists();
-            }
-            long vTmp = readExeVersion(tmp), vDest = readExeVersion(dest);
-            if (vTmp > vDest) {
-                //noinspection ResultOfMethodCallIgnored
-                dest.delete();
-                boolean ok = tmp.renameTo(dest);
-                android.util.Log.i("CycloneFlow", "vortex.exe upgraded v" + vDest + " -> v" + vTmp);
-                return ok && dest.exists();
-            }
-            //noinspection ResultOfMethodCallIgnored
-            tmp.delete();
-            android.util.Log.i("CycloneFlow", "kept existing vortex.exe (v" + vDest + " >= downloaded v" + vTmp + ")");
-            return true;
+            return replaceIfNewer(tmp, dest);
         } catch (Exception e) {
             android.util.Log.e("CycloneFlow", "download exception: " + e);
             //noinspection ResultOfMethodCallIgnored

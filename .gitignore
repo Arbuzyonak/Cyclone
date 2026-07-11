@@ -2,3 +2,6 @@
 .androidide
 .idea
 local.properties
+
+# Bundled proprietary game client (shipped in the release APK, not tracked in git)
+app/src/main/assets/Vortex.exe
