@@ -102,6 +102,26 @@ public class VirtualControllerPresetManagerFragment extends Fragment {
         saveVirtualControllerPresets();
     }
 
+    public static void putOrCreateVirtualControllerPreset(String name, String resolution,
+                                                          ArrayList<VirtualKeyboardInputView.VirtualButton> buttonList,
+                                                          ArrayList<VirtualKeyboardInputView.VirtualAnalog> analogList,
+                                                          ArrayList<VirtualKeyboardInputView.VirtualDPad> dpadList
+    ) {
+        VirtualControllerPreset preset = new VirtualControllerPreset(name, resolution);
+        preset.buttons.addAll(buttonList);
+        preset.analogs.addAll(analogList);
+        preset.dpads.addAll(dpadList);
+
+        int index = IntStream.range(0, presetsList.size()).filter(i -> presetsList.get(i).name.equals(name)).findFirst().orElse(-1);
+        if (index == -1) {
+            presetsList.add(preset);
+        } else {
+            presetsList.set(index, preset);
+        }
+
+        saveVirtualControllerPresets();
+    }
+
     public static void addVirtualControllerPreset(Context context, String name) {
         boolean alreadyExists = presetsList.stream().anyMatch(i -> i.name.equals(name));
         if (alreadyExists) {

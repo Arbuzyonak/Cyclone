@@ -89,6 +89,20 @@ import java.util.HashSet;
 import java.util.Set;
 
 public class EmulationActivity extends AppCompatActivity implements View.OnApplyWindowInsetsListener {
+
+    public void exitToWebView() {
+        WineWrapper.killAll();
+        disconnectController(virtualXInputControllerId);
+        stopInputServer();
+        cleanup();
+
+        Intent intent = new Intent(this, io.github.arbuzyonak.cyclone.CycloneWebActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        startActivity(intent);
+    }
+
+    public static boolean chatKeyboardOpen = false;
+
     public static Handler handler = new Handler();
     private TouchInputHandler mInputHandler;
     protected ICmdEntryInterface service = null;
@@ -191,7 +205,7 @@ public class EmulationActivity extends AppCompatActivity implements View.OnApply
 
         virtualKeyboardInputView = findViewById(R.id.overlayView);
         virtualKeyboardInputView.loadPreset(getSelectedVirtualControllerPreset(selectedGameName));
-        virtualKeyboardInputView.setVisibility(View.INVISIBLE);
+        virtualKeyboardInputView.setVisibility(View.VISIBLE);
 
         virtualControllerInputView = findViewById(R.id.xInputOverlayView);
         virtualControllerInputView.setVisibility(View.INVISIBLE);
@@ -365,28 +379,12 @@ public class EmulationActivity extends AppCompatActivity implements View.OnApply
                 }
             }
 
-            if (k == KeyEvent.KEYCODE_ESCAPE && !(lorieView.hasPointerCapture())) {
-                if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
-                    drawerLayout.openDrawer(GravityCompat.START);
-                } else {
-                    drawerLayout.closeDrawers();
-                }
-            }
-
             if (k == KeyEvent.KEYCODE_BACK) {
                 if (e.getScanCode() == 153 && e.getDevice().getKeyboardType() != InputDevice.KEYBOARD_TYPE_ALPHABETIC || e.getScanCode() == 0) {
                     boolean pointerCaptured = lorieView.hasPointerCapture();
                     if (pointerCaptured) {
                         lorieView.releasePointerCapture();
                     }
-                    if (e.getAction() == KeyEvent.ACTION_UP) {
-                        if (!drawerLayout.isDrawerOpen(GravityCompat.START)) {
-                            drawerLayout.openDrawer(GravityCompat.START);
-                        } else {
-                            drawerLayout.closeDrawers();
-                        }
-                    }
-
                     inputMethodManager.hideSoftInputFromWindow(getWindow().getDecorView().getWindowToken(), 0);
 
                     return true;
@@ -397,6 +395,11 @@ public class EmulationActivity extends AppCompatActivity implements View.OnApply
             } else if (k == KeyEvent.KEYCODE_VOLUME_UP) {
                 audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI);
                 return true;
+            }
+
+            if (k == KeyEvent.KEYCODE_ENTER && chatKeyboardOpen && e.getAction() == KeyEvent.ACTION_UP) {
+                chatKeyboardOpen = false;
+                inputMethodManager.hideSoftInputFromWindow(getWindow().getDecorView().getWindowToken(), 0);
             }
 
             ControllerUtils.updateButtonsState(e);
@@ -419,14 +422,7 @@ public class EmulationActivity extends AppCompatActivity implements View.OnApply
                 }
                 case MotionEvent.BUTTON_SECONDARY: {
                     if (!lorieView.hasPointerCapture()) {
-                        if (!drawerLayout.isDrawerOpen(GravityCompat.START)) {
-                            drawerLayout.openDrawer(GravityCompat.START);
-                        } else {
-                            drawerLayout.closeDrawers();
-                        }
-
-                        inputMethodManager.hideSoftInputFromWindow(getWindow().getDecorView().getWindowToken(), 0);
-
+                        lorieView.requestPointerCapture();
                         return true;
                     }
                 }

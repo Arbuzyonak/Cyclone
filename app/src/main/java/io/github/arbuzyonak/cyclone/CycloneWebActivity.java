@@ -31,18 +31,11 @@ import androidx.core.view.WindowInsetsCompat;
 
 import com.micewine.emu.R;
 
-/**
- * Cyclone launcher screen: a WebView onto playvortex.io. This is the app's entry
- * point. When the user taps Play on the site, it fires a vortex:// URL which we
- * intercept in {@link #shouldOverride} and hand to the embedded MiceWine runtime.
- */
 public class CycloneWebActivity extends AppCompatActivity {
 
     private static final String START_URL = "https://playvortex.io/home";
     private static final String ALLOWED_HOST_SUFFIX = "playvortex.io";
 
-    // playvortex.io's navbar has no responsive collapse below ~900px; patch it
-    // client-side so it doesn't overflow on a phone-width WebView.
     private static final String NAV_OVERRIDE_CSS =
         ".navbar { flex-wrap: wrap !important; height: auto !important; row-gap: 0.5rem !important; padding: 0.5rem 0.75rem !important; }" +
         ".navbar-search { order: 3; flex-basis: 100%; }" +
@@ -166,7 +159,6 @@ public class CycloneWebActivity extends AppCompatActivity {
         }
     }
 
-    /** Returns true if we handled the URL (WebView should not load it). */
     private boolean shouldOverride(Uri url, boolean isMainFrame) {
         String scheme = url.getScheme();
         if ("vortex".equalsIgnoreCase(scheme)) {
@@ -180,16 +172,8 @@ public class CycloneWebActivity extends AppCompatActivity {
         return true;
     }
 
-    /**
-     * Play was tapped on the website; it fired vortex://play?game=X&token=Y.
-     * Launch the embedded runtime with the pre-configured "Vortex" game entry,
-     * overriding its arguments with this fresh authenticated URI. The URI is
-     * single-quoted so the '&' survives the shell command MiceWine builds.
-     */
     private void onVortexUri(Uri uri) {
         String singleQuoted = "'" + uri.toString() + "'";
-        // The session cookie (from login in this WebView) lets the runtime fetch
-        // Vortex.exe on first launch.
         String sessionToken = extractSessionToken();
         Intent launch = new Intent(this, com.micewine.emu.activities.MainActivity.class);
         launch.putExtra("shortcutName", "Vortex");

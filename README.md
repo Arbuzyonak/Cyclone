@@ -1,76 +1,72 @@
-![MiceWine Logo](logo.png "MiceWine Logo")
+<p align="center">
+  <img src="logo.png" width="140" alt="Cyclone logo"/>
+</p>
 
-### MiceWine Emulator
+<h1 align="center">Cyclone</h1>
 
-MiceWine is a project that aims to run Windows applications and games on Android smartphones.
-
-It uses a customized build of Wine compiled for Android and Box64 to run in the best possible way.
-
-Actually in constant development.
+<p align="center">Play Vortex on your Android phone.</p>
 
 ---
 
-### Minimum Requirements
+Cyclone is an unofficial Android client for [Vortex](https://playvortex.io). There is no Android version of the game, so Cyclone runs the real Windows client on your phone: it translates x86 to ARM with Box64, runs the game through Wine, and maps Direct3D to your phone's GPU with DXVK/vkd3d-proton and the Turnip Vulkan driver. All of that is built on top of [MiceWine](https://github.com/KreitinnSoftware/MiceWine-Application), stripped down and tuned for this one game.
 
-- 4GB RAM
-- Vulkan 1.1+
-- Android 10+
-- 64-bit CPU
+You just log in on the site like you normally would, tap Play, and the game launches fullscreen with touch controls.
 
-### Recommended Requirements
+## What you get
 
-- 8GB RAM
-- Vulkan 1.3+ or Turnip Compatible GPU
-- Android 12+
-- 64-bit CPU
+- The normal playvortex.io experience (login, avatar, your game library) in-app
+- One tap to play, no setup screens. The first launch downloads everything it needs
+- Touch controls: tap to click, drag to move the camera, on-screen buttons for moving, jumping and shift lock
+- A chat button that opens the in-game chat and brings up your keyboard
+- A menu button that drops you back to your library when you're done
 
----
+## Requirements
 
-### Tested GPUs
+- An ARM64 phone on Android 9 or newer
+- A Snapdragon chip with an Adreno GPU is strongly recommended. Developed and tested on a Galaxy S23+ (Snapdragon 8 Gen 2 / Adreno 740)
+- Around 5 GB of free storage
+- A Vortex account
 
-- Adreno 610+
-- Adreno 710+
-- Adreno 830
-- Mali G52 MC2
-- Mali G610
-- Mali G615
-- Mali G76
-- Mali G925 Immortalis
-- PowerVR IMG BXM-8-256
-- Xclipse 530
-- Xclipse 920
-- Xclipse 940
+## Installing
 
----
+1. Grab the latest `.apk` from the [Releases](../../releases) page
+2. Open it. Android will ask you to allow installs from your browser or file manager, allow it
+3. Open Cyclone and log into your account
+4. Pick a game and hit Play
 
-### Controller Support
+The first launch takes a while: it downloads the runtime (about 400 MB) and the game itself, then starts. Every launch after that goes straight into the game. Keep the phone plugged in for long sessions, translation is heavy and the phone will get warm.
 
-MiceWine Supports Up To 4 Physical Controllers. With XInput and DInput Automatic Mapping.
+## Controls
 
-Any Xbox Like Controller May Works.
+| Input | Action |
+|---|---|
+| Tap | Left click |
+| Drag | Rotate camera |
+| W / S | Move forward / back |
+| Space | Jump |
+| LShift | Shift lock |
+| Chat | Opens chat and the keyboard (Enter sends and closes it) |
+| Menu | Leave the game, back to your library |
 
-Tested with Ipega 9021s, Ipega 9078, Altomex AL-G7, Xbox One Controller, Xbox Series Controller.
+## Building from source
 
----
+You need JDK 17, the Android SDK and NDK 26.
 
-### Keyboard and Mouse Support
+```
+git clone --recursive https://github.com/Arbuzyonak/Cyclone
+cd Cyclone
+./gradlew assembleDebug
+```
 
-MiceWine Should Work Out of Box with Any QWERTY ABNT2 Keyboard and Mouse.
+The APK lands in `app/build/outputs/apk/debug/`.
 
-When Mouse is Captured Press Alt+Q on Keyboard to Release or Press Back on Device.
+## Credits
 
----
+Cyclone stands on a lot of other people's work:
 
-### RootFS Download
+- [MiceWine](https://github.com/KreitinnSoftware/MiceWine-Application) - the Android Wine runtime this project is forked from (MIT)
+- [Wine](https://www.winehq.org/), [Box64](https://github.com/ptitSeb/box64), [DXVK](https://github.com/doitsujin/dxvk), [vkd3d-proton](https://github.com/HansKristian-Work/vkd3d-proton) and [Mesa/Turnip](https://mesa3d.org/)
 
-You can download the required **RootFS** file from this repository:  
-- [MiceWine RootFS Generator](https://github.com/KreitinnSoftware/MiceWine-RootFS-Generator)
+## Disclaimer
 
----
-
-### Third Party Open Source Applications:
-
-- [Box64](https://github.com/ptitSeb/box64)
-- [WineHQ](https://gitlab.winehq.org/wine/wine)
-- [Termux-X11](https://github.com/termux/termux-x11)
-- [Mesa](https://gitlab.freedesktop.org/mesa/mesa)
+This is a community project. It is not made, endorsed or supported by Vortex or its developers. You need your own account, and the game is downloaded from the official site through your own login, exactly like the Windows launcher does.

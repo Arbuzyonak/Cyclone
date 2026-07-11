@@ -45,6 +45,7 @@ public class XKeyCodes {
             new ScanKeyCode("Y", 21, 53),
             new ScanKeyCode("Z", 44, 54),
             new ScanKeyCode("'", 40, 75),
+            new ScanKeyCode("Chat", 53, 76),
             new ScanKeyCode("LCtrl", 29, 113),
             new ScanKeyCode("RCtrl", 97, 114),
             new ScanKeyCode("LShift", 42, 59),

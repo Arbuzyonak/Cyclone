@@ -1,6 +1,7 @@
 package com.micewine.emu.views;
 
 import static com.micewine.emu.activities.MainActivity.preferences;
+import static com.micewine.emu.activities.MainActivity.selectedResolution;
 import static com.micewine.emu.activities.PresetManagerActivity.SELECTED_VIRTUAL_CONTROLLER_PRESET;
 import static com.micewine.emu.controller.ControllerUtils.DOWN;
 import static com.micewine.emu.controller.ControllerUtils.LEFT;
@@ -33,6 +34,7 @@ import android.graphics.Path;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 
 import androidx.annotation.NonNull;
 
@@ -269,25 +271,92 @@ public class VirtualKeyboardInputView extends View {
         });
     }
 
+    private int freeFingerId = -1;
+    private boolean freeFingerDragging = false;
+    private float freeFingerDownX, freeFingerDownY, freeFingerLastX, freeFingerLastY;
+    private long freeFingerDownTime;
+    private static final long TAP_MAX_MS = 300L;
+
+    private float[] rootScale() {
+        float sx = 1F, sy = 1F;
+        try {
+            String[] r = selectedResolution.split("x");
+            if (getWidth() > 0) sx = Float.parseFloat(r[0]) / getWidth();
+            if (getHeight() > 0) sy = Float.parseFloat(r[1]) / getHeight();
+        } catch (Exception ignored) {
+        }
+        return new float[]{sx, sy};
+    }
+
+    private void finishFreeFinger(MotionEvent event, int index) {
+        if (freeFingerDragging) {
+            lorieView.sendMouseEvent(0F, 0F, BUTTON_RIGHT, false, true);
+        } else if (event.getEventTime() - freeFingerDownTime <= TAP_MAX_MS) {
+            float[] s = rootScale();
+            lorieView.sendMouseEvent(event.getX(index) * s[0], event.getY(index) * s[1], BUTTON_UNDEFINED, false, false);
+            lorieView.sendMouseEvent(0F, 0F, BUTTON_LEFT, true, true);
+            lorieView.sendMouseEvent(0F, 0F, BUTTON_LEFT, false, true);
+        }
+        freeFingerId = -1;
+        freeFingerDragging = false;
+    }
+
+    private void releaseAllInput() {
+        for (VirtualButton button : buttonList) {
+            if (button.isPressed) {
+                button.fingerId = -1;
+                handleButton(button, false);
+            }
+        }
+        for (VirtualAnalog analog : analogList) {
+            if (analog.isPressed) {
+                analog.fingerId = -1;
+                analog.fingerX = 0F;
+                analog.fingerY = 0F;
+                analog.isPressed = false;
+                virtualAxis(0F, 0F, analog);
+            }
+        }
+        for (VirtualDPad dpad : dpadList) {
+            if (dpad.isPressed) {
+                dpad.fingerId = -1;
+                dpad.fingerX = 0F;
+                dpad.fingerY = 0F;
+                dpad.isPressed = false;
+                dpad.dpadStatus = 0;
+                virtualAxis(0F, 0F, dpad);
+            }
+        }
+        if (freeFingerDragging)
+            lorieView.sendMouseEvent(0F, 0F, BUTTON_RIGHT, false, true);
+        freeFingerId = -1;
+        freeFingerDragging = false;
+    }
+
     @SuppressLint("ClickableViewAccessibility")
     @Override
     public boolean onTouchEvent(MotionEvent event) {
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_DOWN -> {
-                buttonList.forEach((i) -> {
-                    if (detectClick(event, event.getActionIndex(), i.x, i.y, i.radius, i.shape)) {
+                int index = event.getActionIndex();
+                int pid = event.getPointerId(index);
+                boolean hit = false;
+
+                for (VirtualButton i : buttonList) {
+                    if (detectClick(event, index, i.x, i.y, i.radius, i.shape)) {
                         i.isPressed = true;
-                        i.fingerId = event.getPointerId(event.getActionIndex());
+                        i.fingerId = pid;
                         handleButton(i, true);
+                        hit = true;
                     }
-                });
-                analogList.forEach((it) -> {
-                    if (detectClick(event, event.getActionIndex(), it.x, it.y, it.radius, SHAPE_CIRCLE)) {
-                        float posX = event.getX(event.getActionIndex()) - it.x;
-                        float posY = event.getY(event.getActionIndex()) - it.y;
+                }
+                for (VirtualAnalog it : analogList) {
+                    if (detectClick(event, index, it.x, it.y, it.radius, SHAPE_CIRCLE)) {
+                        float posX = event.getX(index) - it.x;
+                        float posY = event.getY(index) - it.y;
 
                         it.isPressed = true;
-                        it.fingerId = event.getPointerId(event.getActionIndex());
+                        it.fingerId = pid;
                         it.fingerX = posX;
                         it.fingerY = posY;
 
@@ -295,15 +364,16 @@ public class VirtualKeyboardInputView extends View {
                         float ly = posY / (it.radius / 4F);
 
                         virtualAxis(lx, ly, it);
+                        hit = true;
                     }
-                });
-                dpadList.forEach((it) -> {
-                    if (detectClick(event, event.getActionIndex(), it.x, it.y, it.radius, SHAPE_DPAD)) {
-                        float posX = event.getX(event.getActionIndex()) - it.x;
-                        float posY = event.getY(event.getActionIndex()) - it.y;
+                }
+                for (VirtualDPad it : dpadList) {
+                    if (detectClick(event, index, it.x, it.y, it.radius, SHAPE_DPAD)) {
+                        float posX = event.getX(index) - it.x;
+                        float posY = event.getY(index) - it.y;
 
                         it.isPressed = true;
-                        it.fingerId = event.getPointerId(event.getActionIndex());
+                        it.fingerId = pid;
                         it.fingerX = posX;
                         it.fingerY = posY;
                         it.dpadStatus = getAxisStatus(posX / it.radius, posY / it.radius, 0.25F);
@@ -312,24 +382,26 @@ public class VirtualKeyboardInputView extends View {
                         float ly = posY / (it.radius / 4F);
 
                         virtualAxis(lx, ly, it);
+                        hit = true;
                     }
-                });
+                }
+
+                if (!hit && freeFingerId == -1) {
+                    freeFingerId = pid;
+                    freeFingerDragging = false;
+                    freeFingerDownX = freeFingerLastX = event.getX(index);
+                    freeFingerDownY = freeFingerLastY = event.getY(index);
+                    freeFingerDownTime = event.getEventTime();
+                }
 
                 invalidate();
             }
             case MotionEvent.ACTION_MOVE -> {
                 for (int i = 0; i < event.getPointerCount(); i++) {
-                    boolean isFingerPressingButton = false;
-
-                    for (VirtualButton button : buttonList) {
-                        if (button.isPressed && button.fingerId == event.getPointerId(i)) {
-                            isFingerPressingButton = true;
-                            break;
-                        }
-                    }
+                    int pid = event.getPointerId(i);
 
                     for (VirtualAnalog analog : analogList) {
-                        if (analog.isPressed && analog.fingerId == event.getPointerId(i)) {
+                        if (analog.isPressed && analog.fingerId == pid) {
                             float posX = event.getX(i) - analog.x;
                             float posY = event.getY(i) - analog.y;
 
@@ -340,14 +412,12 @@ public class VirtualKeyboardInputView extends View {
                             float ly = posY / (analog.radius / 4F);
 
                             virtualAxis(lx, ly, analog);
-
-                            isFingerPressingButton = true;
                             break;
                         }
                     }
 
                     for (VirtualDPad dpad : dpadList) {
-                        if (dpad.isPressed && dpad.fingerId == event.getPointerId(i)) {
+                        if (dpad.isPressed && dpad.fingerId == pid) {
                             float posX = event.getX(i) - dpad.x;
                             float posY = event.getY(i) - dpad.y;
 
@@ -359,23 +429,33 @@ public class VirtualKeyboardInputView extends View {
                             float ly = posY / (dpad.radius / 4F);
 
                             virtualAxis(lx, ly, dpad);
-
-                            isFingerPressingButton = true;
                             break;
                         }
                     }
 
-                    if (!isFingerPressingButton && event.getHistorySize() > 0) {
-                        float deltaX = event.getX(i) - event.getHistoricalX(i, 0);
-                        float deltaY = event.getY(i) - event.getHistoricalY(i, 0);
+                    if (pid == freeFingerId) {
+                        float x = event.getX(i);
+                        float y = event.getY(i);
 
-                        lorieView.sendMouseEvent(deltaX, deltaY, BUTTON_UNDEFINED, false, true);
+                        if (!freeFingerDragging
+                                && Math.hypot(x - freeFingerDownX, y - freeFingerDownY) > ViewConfiguration.get(getContext()).getScaledTouchSlop()) {
+                            freeFingerDragging = true;
+                            lorieView.sendMouseEvent(0F, 0F, BUTTON_RIGHT, true, true);
+                        }
+                        if (freeFingerDragging) {
+                            float[] s = rootScale();
+                            lorieView.sendMouseEvent((x - freeFingerLastX) * s[0], (y - freeFingerLastY) * s[1], BUTTON_UNDEFINED, false, true);
+                        }
+                        freeFingerLastX = x;
+                        freeFingerLastY = y;
                     }
                 }
 
                 invalidate();
             }
             case MotionEvent.ACTION_POINTER_UP -> {
+                if (event.getPointerId(event.getActionIndex()) == freeFingerId)
+                    finishFreeFinger(event, event.getActionIndex());
                 for (VirtualButton button : buttonList) {
                     if (button.fingerId == event.getPointerId(event.getActionIndex())) {
                         button.fingerId = -1;
@@ -408,6 +488,8 @@ public class VirtualKeyboardInputView extends View {
                 invalidate();
             }
             case MotionEvent.ACTION_UP -> {
+                if (freeFingerId != -1)
+                    finishFreeFinger(event, event.getActionIndex());
                 for (VirtualButton button : buttonList) {
                     if (button.isPressed) {
                         button.fingerId = -1;
@@ -436,6 +518,10 @@ public class VirtualKeyboardInputView extends View {
 
                 invalidate();
             }
+            case MotionEvent.ACTION_CANCEL -> {
+                releaseAllInput();
+                invalidate();
+            }
         }
 
         return true;
@@ -451,7 +537,28 @@ public class VirtualKeyboardInputView extends View {
 
     private void handleButton(VirtualButton button, boolean isPressed) {
         button.isPressed = isPressed;
+
+        if ("Menu".equals(button.keyName)) {
+            if (!isPressed && getContext() instanceof com.micewine.emu.activities.EmulationActivity activity)
+                activity.exitToWebView();
+            invalidate();
+            return;
+        }
+
         handleKey(isPressed, button.buttonMapping);
+
+        if (!isPressed && "Chat".equals(button.keyName) && getContext() instanceof android.app.Activity activity) {
+            View real = activity.findViewById(R.id.lorieView);
+            if (real != null) {
+                real.requestFocus();
+                android.view.inputmethod.InputMethodManager imm =
+                        (android.view.inputmethod.InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+                if (imm != null) {
+                    imm.showSoftInput(real, 0);
+                    com.micewine.emu.activities.EmulationActivity.chatKeyboardOpen = true;
+                }
+            }
+        }
     }
 
     public static class VirtualButton {

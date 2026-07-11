@@ -67,6 +67,7 @@
         <activity
             android:name="io.github.arbuzyonak.cyclone.CycloneWebActivity"
             android:exported="true"
+            android:screenOrientation="sensorLandscape"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:theme="@style/Theme.MiceWine">
             <intent-filter>
@@ -78,6 +79,7 @@
         <activity
             android:name=".activities.MainActivity"
             android:configChanges="fontScale|orientation|screenSize|keyboard|keyboardHidden|layoutDirection|locale|mcc|mnc|navigation|screenLayout|touchscreen|uiMode|smallestScreenSize|density"
+            android:screenOrientation="sensorLandscape"
             android:exported="true"
             android:launchMode="singleTop"
             android:theme="@style/Theme.MiceWine">

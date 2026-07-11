@@ -40,6 +40,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -79,6 +81,8 @@ public class RatPackageManager {
         runCommand("sh " + extractDir + "/makeSymlinks.sh " + extractDir + "/", false);
 
         new File(extractDir, "makeSymlinks.sh").delete();
+
+        createSonameSymlinks(new File(extractDir, "files/usr/lib"));
 
         switch (ratPackage.category) {
             case "Core" -> {
@@ -121,6 +125,35 @@ public class RatPackageManager {
         }
 
         setPackageExternal(extractDir);
+    }
+
+    public static void createSonameSymlinks(File libDir) {
+        if (libDir == null || !libDir.isDirectory()) return;
+        File[] files = libDir.listFiles();
+        if (files == null) return;
+        for (File f : files) {
+            String n = f.getName();
+            int idx = n.indexOf(".so.");
+            if (idx < 0) continue;
+            Path real = f.toPath();
+            // skip symlinks; we only key off the real versioned files
+            if (Files.isSymbolicLink(real)) continue;
+            String soBase = n.substring(0, idx + 3);
+            String version = n.substring(idx + 4);
+            String major = version.split("\\.")[0];
+            Path target = Path.of(n);
+            makeLinkIfAbsent(libDir, soBase + "." + major, target);
+            makeLinkIfAbsent(libDir, soBase, target);
+        }
+    }
+
+    private static void makeLinkIfAbsent(File libDir, String linkName, Path target) {
+        Path link = libDir.toPath().resolve(linkName);
+        if (Files.exists(link, LinkOption.NOFOLLOW_LINKS)) return;
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (Exception ignored) {
+        }
     }
 
     public static void deleteRatPackageById(String id) {

@@ -621,6 +621,8 @@ void renderer_redraw_locked(JNIEnv* env) {
 
     // Not a mistake, we reset drawRequested flag even in the case if there is no legacy drawing.
     state->drawRequested = FALSE;
+    if (win)
+        glViewport(0, 0, ANativeWindow_getWidth(win), ANativeWindow_getHeight(win));
     draw(display.id,  -1.f, -1.f, 1.f, 1.f, display.desc.format != AHARDWAREBUFFER_FORMAT_B8G8R8A8_UNORM);
     fence = eglCreateSyncKHR(egl_display, EGL_SYNC_FENCE_KHR, NULL);
     glFlush();
@@ -800,6 +802,8 @@ static void draw(GLuint id, float x0, float y0, float x1, float y1, uint8_t flip
 
 __unused static void draw_cursor(void) {
     float x, y, w, h;
+
+    return;
 
     if (!state->cursor.width || !state->cursor.height)
         return;

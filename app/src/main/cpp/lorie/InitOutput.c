@@ -63,6 +63,9 @@ from The Open Group.
 #include "inpututils.h"
 #include "exa.h"
 #include "drm_fourcc.h"
+#include "windowstr.h"
+#include "inputstr.h"
+#include "dixevents.h"
 
 #include "lorie.h"
 
@@ -614,6 +617,36 @@ void lorieChoreographerFrameCallback(__unused long t, AChoreographer* d) {
     }
 }
 
+static RealizeWindowProcPtr lorieRealizeWindowProc;
+
+static Bool lorieFocusWindowWorkProc(unused ClientPtr client, void *closure) {
+    WindowPtr pWin;
+    Window id = (Window) (uintptr_t) closure;
+    if (dixLookupWindow(&pWin, id, serverClient, DixSetAttrAccess) == Success && pWin->realized) {
+        SetInputFocus(serverClient, inputInfo.keyboard, id, RevertToParent, CurrentTime, FALSE);
+        __android_log_print(ANDROID_LOG_INFO, "LorieNative", "mini-WM: focused window 0x%x", (unsigned) id);
+    }
+    return TRUE;
+}
+
+static Bool lorieRealizeWindow(WindowPtr pWin) {
+    ScreenPtr pScreen = pWin->drawable.pScreen;
+    Bool ret = TRUE;
+    pScreen->RealizeWindow = lorieRealizeWindowProc;
+    if (pScreen->RealizeWindow)
+        ret = (*pScreen->RealizeWindow)(pWin);
+    lorieRealizeWindowProc = pScreen->RealizeWindow;
+    pScreen->RealizeWindow = lorieRealizeWindow;
+
+    if (ret && pWin->parent && pWin->parent == pScreen->root
+            && pWin->drawable.class == InputOutput
+            && pWin->drawable.width >= 200 && pWin->drawable.height >= 200) {
+        QueueWorkProc(lorieFocusWindowWorkProc, NULL, (void *) (uintptr_t) pWin->drawable.id);
+        lorieTriggerWorkingQueue();
+    }
+    return ret;
+}
+
 static Bool lorieScreenInit(ScreenPtr pScreen, unused int argc, unused char **argv) {
     static int eventFd = -1;
     pScreenPtr = pScreen;
@@ -647,6 +680,9 @@ static Bool lorieScreenInit(ScreenPtr pScreen, unused int argc, unused char **ar
 
     ShmRegisterFbFuncs(pScreen);
     miSyncShmScreenInit(pScreen);
+
+    lorieRealizeWindowProc = pScreen->RealizeWindow;
+    pScreen->RealizeWindow = lorieRealizeWindow;
 
     return TRUE;
 }                               /* end lorieScreenInit */

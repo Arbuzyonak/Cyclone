@@ -164,43 +164,26 @@ public class LorieView extends SurfaceView implements InputStub {
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         super.onMeasure(widthMeasureSpec, heightMeasureSpec);
 
-        /*
-        if (preferences?.getBoolean("displayStretch", false) == true) {
-            holder.setSizeFromLayout()
-            return
-        }
-         */
-
-        if (preferences != null) {
-            if (preferences.getBoolean("displayStretch", false)) {
-                getHolder().setSizeFromLayout();
-                return;
-            }
-        }
-
         getDimensionsFromSettings();
-
         if (p.x <= 0 || p.y <= 0)
             return;
 
-        int width = getMeasuredWidth();
-        int height = getMeasuredHeight();
-
-        if ((width < height && p.x > p.y) || (width > height && p.x < p.y))
-            //noinspection SuspiciousNameCombination
-            p.set(p.y, p.x);
-
-        if (width > height * p.x / p.y) {
-            width = height * p.x / p.y;
-        } else {
-            height = width * p.y / p.x;
-        }
+        int fw = MeasureSpec.getSize(widthMeasureSpec);
+        int fh = MeasureSpec.getSize(heightMeasureSpec);
+        if (fw <= 0 || fh <= 0)
+            return;
 
         getHolder().setFixedSize(p.x, p.y);
-        setMeasuredDimension(width, height);
 
-        // In the case if old fixed surface size equals new fixed surface size windowChanged will not be called.
-        // We should force it.
+        final int cropTopPx = 23;
+        final int cropLeftPx = 4;
+        int viewW = Math.round((float) fw * p.x / (p.x - cropLeftPx));
+        int viewH = Math.round((float) fh * p.y / (p.y - cropTopPx));
+        setMeasuredDimension(viewW, viewH);
+        setTranslationX(fw - viewW);
+        setTranslationY(fh - viewH);
+        android.util.Log.i("CycloneDisplay", "buffer " + p.x + "x" + p.y + " -> view " + viewW + "x" + viewH + " (decor crop " + (viewW - fw) + "," + (viewH - fh) + ")");
+
         regenerate();
     }
 

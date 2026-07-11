@@ -107,6 +107,7 @@ import static com.micewine.emu.fragments.ShortcutsFragment.getCpuAffinity;
 import static com.micewine.emu.fragments.ShortcutsFragment.getD3DXRenderer;
 import static com.micewine.emu.fragments.ShortcutsFragment.getDXVKVersion;
 import static com.micewine.emu.fragments.ShortcutsFragment.getDisplaySettings;
+import static com.micewine.emu.fragments.ShortcutsFragment.putDisplaySettings;
 import static com.micewine.emu.fragments.ShortcutsFragment.getEnableDInput;
 import static com.micewine.emu.fragments.ShortcutsFragment.getEnableXInput;
 import static com.micewine.emu.fragments.ShortcutsFragment.getExeArguments;
@@ -176,6 +177,7 @@ import com.micewine.emu.fragments.FloatingFileManagerFragment;
 import com.micewine.emu.fragments.SetupFragment;
 import com.micewine.emu.fragments.ShortcutsFragment;
 import com.micewine.emu.fragments.VirtualControllerPresetManagerFragment;
+import com.micewine.emu.views.VirtualKeyboardInputView;
 import com.micewine.emu.utils.FilePathResolver;
 
 import java.io.File;
@@ -486,12 +488,11 @@ public class MainActivity extends AppCompatActivity {
         inputManager = (InputManager) getSystemService(INPUT_SERVICE);
         inputManager.registerInputDeviceListener(inputDeviceListener, null);
 
-        // Cyclone: when launched from the WebView's Play button, run headless — never
-        // show MiceWine's shortcuts UI, only a progress overlay while provisioning.
         cycloneMode = getIntent().getStringExtra("cycloneExeArgs") != null;
 
+        boolean cycloneHeadless = cycloneMode;
         ActivityMainBinding binding = ActivityMainBinding.inflate(getLayoutInflater());
-        if (!cycloneMode) {
+        if (!cycloneHeadless) {
             setContentView(binding.getRoot());
         } else {
             setContentView(R.layout.cyclone_setup);
@@ -506,7 +507,7 @@ public class MainActivity extends AppCompatActivity {
         editor.putString(APP_VERSION, BuildConfig.VERSION_NAME);
         editor.apply();
 
-        if (!cycloneMode) {
+        if (!cycloneHeadless) {
             bottomNavigation = findViewById(R.id.bottom_navigation);
             bottomNavigation.setOnItemSelectedListener(item -> {
                 if (item.getItemId() == R.id.nav_shortcuts) {
@@ -574,8 +575,6 @@ public class MainActivity extends AppCompatActivity {
         boolean hasWinePrefix = !(getWinePrefixes().isEmpty());
         boolean canProceed = (hasCore && hasWine && hasWinePrefix && hasVulkanDriver && hasDXVK && hasVKD3D && hasWineD3D && (deviceArch.equals("x86_64") || hasBox64));
 
-        // Cyclone provisions headlessly (see cycloneEnsureAndLaunch); everyone else uses
-        // MiceWine's setup wizard.
         if (!canProceed && !cycloneMode) startActivity(new Intent(this, WelcomeActivity.class));
     }
 
@@ -696,6 +695,14 @@ public class MainActivity extends AppCompatActivity {
             }).start();
         }
 
+        if (preferences != null && !preferences.getBoolean("cycloneWineRegApplied", false)) {
+            WineWrapper.wine("reg add HKCU\\\\Software\\\\Wine\\\\X11\\ Driver /t REG_SZ /v Managed /d N /f");
+            WineWrapper.wine("reg add HKCU\\\\Software\\\\Wine\\\\X11\\ Driver /t REG_SZ /v Decorated /d N /f");
+            WineWrapper.wine("reg add HKCU\\\\Control\\ Panel\\\\Desktop\\\\WindowMetrics /t REG_SZ /v CaptionHeight /d -15 /f");
+            runCommand(getEnv() + "WINEPREFIX='" + winePrefixesDir + "/" + winePrefix + "' wineserver -k", false);
+            preferences.edit().putBoolean("cycloneWineRegApplied", true).apply();
+        }
+
         if (exePath.isEmpty()) {
             WineWrapper.wine("explorer /desktop=shell," + selectedResolution + " window_handler.exe " + getCpuHexMask(selectedCpuAffinity) + " TFM");
         } else {
@@ -774,8 +781,6 @@ public class MainActivity extends AppCompatActivity {
         String shortcutName = intent.getStringExtra("shortcutName");
 
         if (shortcutName != null) {
-            // Cyclone: launched from the WebView's Play button, which passes the fresh
-            // play URI (cycloneExeArgs) and the session token (to fetch Vortex.exe).
             String cycloneExeArgs = intent.getStringExtra("cycloneExeArgs");
             String cycloneSessionToken = intent.getStringExtra("cycloneSessionToken");
 
@@ -796,8 +801,6 @@ public class MainActivity extends AppCompatActivity {
         new EditGamePreferencesFragment(FILE_MANAGER_START_PREFERENCES, new File(filePath)).show(getSupportFragmentManager(), "");
     }
 
-    // ---- Cyclone launch orchestration ----
-
     private boolean cycloneRuntimeReady() {
         boolean box64 = deviceArch.equals("x86_64") || haveAnyPackageByCategory(BOX64);
         return haveAnyPackageByCategory(CORE) && haveAnyPackageByCategory(WINE)
@@ -806,7 +809,6 @@ public class MainActivity extends AppCompatActivity {
                 && box64 && !getWinePrefixes().isEmpty();
     }
 
-    /** Full automatic flow: provision runtime if needed, ensure Vortex.exe, then launch. */
     private void cycloneEnsureAndLaunch(String shortcutName, String exeArgs, String sessionToken) {
         new Thread(() -> {
             android.util.Log.i("CycloneFlow", "start; token=" + (sessionToken == null ? "null" : sessionToken.length() + " chars") + " ready=" + cycloneRuntimeReady());
@@ -818,40 +820,54 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
             android.util.Log.i("CycloneFlow", "runtime ready, winePrefix=" + winePrefix);
-            // Always refresh shared vars (recreates the usr->Core symlink the X server
-            // needs) before launching, in case a prior provision left it stale.
             setSharedVars(this);
 
-            // Start the X server FRESH and WAIT until it's actually accepting
-            // connections. Cyclone launches automatically, so without this the game's
-            // wineboot/explorer races ahead of the X server and fails ("graphics driver
-            // missing"). Delete any stale socket/lock first so we detect the REAL new one.
-            File xSocket = new File(tmpDir, ".X11-unix/X0");
-            runCommand("rm -f " + tmpDir + "/.X11-unix/X0 " + tmpDir + "/.X0-lock", false);
-            runCommand("pkill -9 -f CmdEntryPoint", false);
-            runningXServer = false;
-            try { Thread.sleep(300); } catch (InterruptedException ignored) {}
-            runOnUiThread(this::runXServer);
-            for (int i = 0; i < 150 && !xSocket.exists(); i++) {
-                try { Thread.sleep(100); } catch (InterruptedException ignored) {}
-            }
-            try { Thread.sleep(800); } catch (InterruptedException ignored) {} // let it finish binding
-            android.util.Log.i("CycloneFlow", "X server socket=" + xSocket.exists() + " after fresh start");
+            cycloneStartXServer();
 
-            // Seed the "Vortex" entry on first run (GameItem ctor picks valid installed
-            // driver/dxvk IDs); refresh its arguments with the fresh play URI each launch.
             if (getExePath("Vortex").isEmpty()) {
                 AdapterGame.GameItem item = new AdapterGame.GameItem("Vortex", "c:\\Vortex\\Vortex.exe", exeArgs, "");
-                item.envVars.add(new AdapterEnvVar.EnvVar("WINEDLLOVERRIDES", "windows.gaming.input="));
-                item.envVars.add(new AdapterEnvVar.EnvVar("BOX64_DYNAREC_BIGBLOCK", "0"));
-                item.envVars.add(new AdapterEnvVar.EnvVar("BOX64_DYNAREC_CALLRET", "0"));
-                item.envVars.add(new AdapterEnvVar.EnvVar("BOX64_DYNAREC_STRONGMEM", "1"));
-                item.envVars.add(new AdapterEnvVar.EnvVar("BOX64_DYNAREC_SAFEFLAGS", "2"));
                 ShortcutsFragment.gameList.add(item);
                 ShortcutsFragment.saveShortcuts();
             } else {
                 putExeArguments("Vortex", exeArgs);
             }
+
+            java.util.List<AdapterEnvVar.EnvVar> vortexEnv = new java.util.ArrayList<>();
+            vortexEnv.add(new AdapterEnvVar.EnvVar("WINEDLLOVERRIDES", "windows.gaming.input="));
+            vortexEnv.add(new AdapterEnvVar.EnvVar("BOX64_DYNAREC_BIGBLOCK", "0"));
+            vortexEnv.add(new AdapterEnvVar.EnvVar("BOX64_DYNAREC_CALLRET", "0"));
+            vortexEnv.add(new AdapterEnvVar.EnvVar("BOX64_DYNAREC_STRONGMEM", "1"));
+            vortexEnv.add(new AdapterEnvVar.EnvVar("BOX64_DYNAREC_SAFEFLAGS", "2"));
+            ShortcutsFragment.putEnvVars("Vortex", vortexEnv);
+
+            if (preferences != null) {
+                preferences.edit()
+                        .putBoolean(RAM_COUNTER, false)
+                        .putBoolean(ENABLE_DEBUG_INFO, false)
+                        .putBoolean(ENABLE_MANGOHUD, false)
+                        .putBoolean("displayStretch", true)
+                        .apply();
+            }
+
+            putDisplaySettings("Vortex", "16:9", "1280x720");
+            ShortcutsFragment.putWineVirtualDesktop("Vortex", false);
+
+            String nativeRes = getNativeResolution(this);
+            int nw = Integer.parseInt(nativeRes.split("x")[0]);
+            int nh = Integer.parseInt(nativeRes.split("x")[1]);
+            float big = nh * 0.20F;
+            float small = nh * 0.14F;
+            java.util.ArrayList<VirtualKeyboardInputView.VirtualButton> vButtons = new java.util.ArrayList<>();
+            vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.10F, nh * 0.58F, big, "W", VirtualKeyboardInputView.SHAPE_CIRCLE));
+            vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.10F, nh * 0.84F, big, "S", VirtualKeyboardInputView.SHAPE_CIRCLE));
+            vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.90F, nh * 0.80F, big, "Space", VirtualKeyboardInputView.SHAPE_CIRCLE));
+            vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.81F, nh * 0.55F, small, "LShift", VirtualKeyboardInputView.SHAPE_CIRCLE));
+            vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.81F, nh * 0.73F, small, "Chat", VirtualKeyboardInputView.SHAPE_CIRCLE));
+            vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.93F, nh * 0.13F, small, "Menu", VirtualKeyboardInputView.SHAPE_CIRCLE));
+            VirtualControllerPresetManagerFragment.putOrCreateVirtualControllerPreset(
+                    "Cyclone", nativeRes, vButtons, new java.util.ArrayList<>(), new java.util.ArrayList<>());
+            ShortcutsFragment.putSelectedVirtualControllerPreset("Vortex", "Cyclone");
+            ShortcutsFragment.putVirtualControllerXInput("Vortex", false);
 
             File exe = new File(winePrefixesDir, winePrefix + "/drive_c/Vortex/Vortex.exe");
             android.util.Log.i("CycloneFlow", "vortex.exe path=" + exe.getPath() + " exists=" + exe.exists() + " len=" + (exe.exists() ? exe.length() : -1));
@@ -871,8 +887,20 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    /** Headless one-time runtime provisioning: download + install the known-good package
-     *  set, then create the Wine prefix. Blocks; call off the UI thread. */
+    private void cycloneStartXServer() {
+        File xSocket = new File(tmpDir, ".X11-unix/X0");
+        runCommand("rm -f " + tmpDir + "/.X11-unix/X0 " + tmpDir + "/.X0-lock", false);
+        runCommand("pkill -9 -f CmdEntryPoint", false);
+        runningXServer = false;
+        try { Thread.sleep(300); } catch (InterruptedException ignored) {}
+        runOnUiThread(this::runXServer);
+        for (int i = 0; i < 150 && !xSocket.exists(); i++) {
+            try { Thread.sleep(100); } catch (InterruptedException ignored) {}
+        }
+        try { Thread.sleep(800); } catch (InterruptedException ignored) {}
+        android.util.Log.i("CycloneFlow", "X server socket=" + xSocket.exists());
+    }
+
     private boolean cycloneProvision() {
         try {
             setSharedVars(this);
@@ -926,14 +954,16 @@ public class MainActivity extends AppCompatActivity {
 
             cycloneStatus(getString(R.string.cyclone_setup_prefix));
             if (winePrefix == null) winePrefix = "default";
-            // Re-run setSharedVars now that SELECTED_CORE is set by installRat — this
-            // (re)creates the `usr` -> Core symlink the X server's TMPDIR depends on.
-            // Without it, winex11 can't reach the display ("graphics driver missing").
             setSharedVars(this);
             addGameToList(getString(R.string.desktop_mode_init), getString(R.string.desktop_mode_init), "");
             java.util.List<RatPackageManager.RatPackage> winePackages = listRatPackages("Wine");
             if (winePackages.isEmpty()) return false;
+            cycloneStartXServer();
             createWinePrefix(winePrefix, winePackages.get(0).getFolderName());
+
+            if (preferences != null) {
+                preferences.edit().putBoolean("cycloneWineRegApplied", false).apply();
+            }
 
             return true;
         } catch (Exception e) {
@@ -979,7 +1009,6 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    /** Fetch Vortex.exe from playvortex.io/download/windows (a zip) into the prefix. */
     private boolean downloadVortexExe(File dest, String sessionToken) {
         try {
             //noinspection ResultOfMethodCallIgnored
@@ -1022,15 +1051,12 @@ public class MainActivity extends AppCompatActivity {
         return false;
     }
 
-    /** Launch a stored game by name, optionally overriding its stored arguments. */
     private void launchNamedGame(String name, String overrideArgs) {
         selectedGameName = name;
 
         Intent runActivityIntent = new Intent(this, EmulationActivity.class);
         Intent runWineIntent = new Intent(ACTION_RUN_WINE);
 
-        // Convert the stored Windows path (c:\Vortex\Vortex.exe) to a real unix path,
-        // exactly like AdapterGame does — runWine needs a path with unix separators.
         String exePath = new File(getUnixPath(getExePath(name))).getPath();
         runWineIntent.putExtra("exePath", exePath);
         runWineIntent.putExtra("exeArguments", overrideArgs != null ? overrideArgs : getExeArguments(name));
@@ -1193,6 +1219,7 @@ public class MainActivity extends AppCompatActivity {
         if (!selectedCore.isEmpty()) {
             runCommand("rm -rf " + usrDir, false);
             runCommand("ln -sf " + ratPackagesDir + "/" + selectedCore + "/files/usr " + usrDir, false);
+            RatPackageManager.createSonameSymlinks(new File(ratPackagesDir, selectedCore + "/files/usr/lib"));
         }
 
         tmpDir.mkdirs();
