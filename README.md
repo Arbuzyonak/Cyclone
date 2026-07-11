@@ -8,7 +8,7 @@
 
 ---
 
-Cyclone is an unofficial Android client for [Vortex](https://playvortex.io). There is no Android version of the game, so Cyclone runs the real Windows client on your phone: it translates x86 to ARM with Box64, runs the game through Wine, and maps Direct3D to your phone's GPU with DXVK/vkd3d-proton and the Turnip Vulkan driver. All of that is built on top of [MiceWine](https://github.com/KreitinnSoftware/MiceWine-Application), stripped down and tuned for this one game.
+Cyclone is an unofficial Android client for [Vortex](https://playvortex.io). There is no Android version of the game, so Cyclone runs the real Windows client on your phone: it translates x86 to ARM with Box64, runs the game through Wine, and maps Direct3D to your phone's GPU with DXVK/vkd3d-proton and the Turnip Vulkan driver. All of that is built on top of [MiceWine](https://github.com/KreitinnSoftware/MiceWine-Application), stripped down and tuned for Vortex.
 
 You just log in on the site like you normally would, tap Play, and the game launches fullscreen with touch controls.
 
