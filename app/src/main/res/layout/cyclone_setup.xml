@@ -35,4 +35,15 @@
         android:progressTint="#FFFFFF"
         android:progressBackgroundTint="#33FFFFFF" />
 
+    <TextView
+        android:id="@+id/cyclone_setup_hint"
+        android:layout_width="320dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:alpha="0.6"
+        android:gravity="center"
+        android:text="@string/cyclone_setup_hint"
+        android:textColor="#E9EAEC"
+        android:textSize="12sp" />
+
 </LinearLayout>

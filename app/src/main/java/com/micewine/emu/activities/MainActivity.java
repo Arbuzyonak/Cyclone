@@ -810,10 +810,23 @@ public class MainActivity extends AppCompatActivity {
                 && box64 && !getWinePrefixes().isEmpty();
     }
 
+    public static volatile String cycloneLastExeArgs;
+    public static volatile String cycloneLastSessionToken;
+
     private void cycloneEnsureAndLaunch(String shortcutName, String exeArgs, String sessionToken) {
+        cycloneLastExeArgs = exeArgs;
+        cycloneLastSessionToken = sessionToken;
         new Thread(() -> {
-            android.util.Log.i("CycloneFlow", "start; token=" + (sessionToken == null ? "null" : sessionToken.length() + " chars") + " ready=" + cycloneRuntimeReady());
-            if (!cycloneRuntimeReady()) {
+            boolean ready = cycloneRuntimeReady();
+            android.util.Log.i("CycloneFlow", "start; token=" + (sessionToken == null ? "null" : sessionToken.length() + " chars") + " ready=" + ready);
+            if (ready) {
+                // the first-time hint only makes sense while provisioning
+                runOnUiThread(() -> {
+                    android.view.View hint = findViewById(R.id.cyclone_setup_hint);
+                    if (hint != null) hint.setVisibility(android.view.View.GONE);
+                });
+            }
+            if (!ready) {
                 if (!cycloneProvision() || !cycloneRuntimeReady()) {
                     android.util.Log.e("CycloneFlow", "provision/ready failed");
                     cycloneFail("Setup failed. Check your connection and try again.");
@@ -835,19 +848,24 @@ public class MainActivity extends AppCompatActivity {
 
             cycloneSelectVulkanDriver();
 
+            android.content.SharedPreferences cyc = getSharedPreferences("cyclone", MODE_PRIVATE);
+            boolean safeMode = cyc.getBoolean("safeMode", false);
+            // "fast" trades some dynarec safety for speed; safe mode forces the stable set.
+            boolean fast = !safeMode && "fast".equals(cyc.getString("perfPreset", "stable"));
             java.util.List<AdapterEnvVar.EnvVar> vortexEnv = new java.util.ArrayList<>();
             vortexEnv.add(new AdapterEnvVar.EnvVar("WINEDLLOVERRIDES", "windows.gaming.input="));
-            vortexEnv.add(new AdapterEnvVar.EnvVar("BOX64_DYNAREC_BIGBLOCK", "0"));
-            vortexEnv.add(new AdapterEnvVar.EnvVar("BOX64_DYNAREC_CALLRET", "0"));
+            vortexEnv.add(new AdapterEnvVar.EnvVar("BOX64_DYNAREC_BIGBLOCK", fast ? "1" : "0"));
+            vortexEnv.add(new AdapterEnvVar.EnvVar("BOX64_DYNAREC_CALLRET", fast ? "1" : "0"));
             vortexEnv.add(new AdapterEnvVar.EnvVar("BOX64_DYNAREC_STRONGMEM", "1"));
-            vortexEnv.add(new AdapterEnvVar.EnvVar("BOX64_DYNAREC_SAFEFLAGS", "2"));
+            vortexEnv.add(new AdapterEnvVar.EnvVar("BOX64_DYNAREC_SAFEFLAGS", fast ? "1" : "2"));
             vortexEnv.add(new AdapterEnvVar.EnvVar("VORTEX_NO_UPDATE", "1"));
             vortexEnv.add(new AdapterEnvVar.EnvVar("WINEDEBUG", "warn+process"));
             vortexEnv.add(new AdapterEnvVar.EnvVar("RUST_BACKTRACE", "full"));
-            android.content.SharedPreferences cyc = getSharedPreferences("cyclone", MODE_PRIVATE);
-            int fpsCap = cyc.getInt("fpsCap", 60);
+            int fpsCap = safeMode ? 60 : cyc.getInt("fpsCap", 60);
             if (fpsCap > 0)
                 vortexEnv.add(new AdapterEnvVar.EnvVar("DXVK_FRAME_RATE", String.valueOf(fpsCap)));
+            if (!safeMode && cyc.getBoolean("fpsHud", false))
+                vortexEnv.add(new AdapterEnvVar.EnvVar("DXVK_HUD", "fps"));
             ShortcutsFragment.putEnvVars("Vortex", vortexEnv);
 
             if (preferences != null) {
@@ -859,39 +877,49 @@ public class MainActivity extends AppCompatActivity {
                         .apply();
             }
 
-            String renderRes = cyc.getInt("renderHeight", 720) >= 1080 ? "1920x1080" : "1280x720";
+            String renderRes = !safeMode && cyc.getInt("renderHeight", 720) >= 1080 ? "1920x1080" : "1280x720";
             putDisplaySettings("Vortex", "16:9", renderRes);
             ShortcutsFragment.putWineVirtualDesktop("Vortex", false);
 
-            String nativeRes = getNativeResolution(this);
-            int nw = Integer.parseInt(nativeRes.split("x")[0]);
-            int nh = Integer.parseInt(nativeRes.split("x")[1]);
-            float big = nh * 0.20F;
-            float small = nh * 0.14F;
-            java.util.ArrayList<VirtualKeyboardInputView.VirtualButton> vButtons = new java.util.ArrayList<>();
-            vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.90F, nh * 0.80F, big, "Space", VirtualKeyboardInputView.SHAPE_CIRCLE));
-            vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.81F, nh * 0.55F, small, "LShift", VirtualKeyboardInputView.SHAPE_CIRCLE));
-            vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.81F, nh * 0.73F, small, "Chat", VirtualKeyboardInputView.SHAPE_CIRCLE));
-            vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.93F, nh * 0.13F, small, "Menu", VirtualKeyboardInputView.SHAPE_CIRCLE));
-            // Optional buttons, off by default, toggled in the in-game settings panel.
-            if (cyc.getBoolean("btnE", false))
-                vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.90F, nh * 0.58F, small, "E", VirtualKeyboardInputView.SHAPE_CIRCLE));
-            if (cyc.getBoolean("btnR", false))
-                vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.73F, nh * 0.85F, small, "R", VirtualKeyboardInputView.SHAPE_CIRCLE));
-            if (cyc.getBoolean("btnNumbers", false)) {
-                vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.06F, nh * 0.42F, small, "1", VirtualKeyboardInputView.SHAPE_CIRCLE));
-                vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.13F, nh * 0.42F, small, "2", VirtualKeyboardInputView.SHAPE_CIRCLE));
-                vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.20F, nh * 0.42F, small, "3", VirtualKeyboardInputView.SHAPE_CIRCLE));
+            // keep a layout the user rearranged in the overlay mapper; only rebuild the
+            // default when it was never customized (or the preset is gone entirely)
+            boolean controlsCustomized = cyc.getBoolean("controlsCustomized", false)
+                    && VirtualControllerPresetManagerFragment.getVirtualControllerPreset("Cyclone") != null;
+            if (!controlsCustomized) {
+                String nativeRes = getNativeResolution(this);
+                int nw = Integer.parseInt(nativeRes.split("x")[0]);
+                int nh = Integer.parseInt(nativeRes.split("x")[1]);
+                float big = nh * 0.20F;
+                float small = nh * 0.14F;
+                java.util.ArrayList<VirtualKeyboardInputView.VirtualButton> vButtons = new java.util.ArrayList<>();
+                vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.90F, nh * 0.80F, big, "Space", VirtualKeyboardInputView.SHAPE_CIRCLE));
+                vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.81F, nh * 0.55F, small, "LShift", VirtualKeyboardInputView.SHAPE_CIRCLE));
+                vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.81F, nh * 0.73F, small, "Chat", VirtualKeyboardInputView.SHAPE_CIRCLE));
+                vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.93F, nh * 0.13F, small, "Menu", VirtualKeyboardInputView.SHAPE_CIRCLE));
+                // Optional buttons, off by default, toggled in the in-game settings panel.
+                if (cyc.getBoolean("btnE", false))
+                    vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.90F, nh * 0.58F, small, "E", VirtualKeyboardInputView.SHAPE_CIRCLE));
+                if (cyc.getBoolean("btnR", false))
+                    vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.73F, nh * 0.85F, small, "R", VirtualKeyboardInputView.SHAPE_CIRCLE));
+                if (cyc.getBoolean("btnNumbers", false)) {
+                    vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.06F, nh * 0.42F, small, "1", VirtualKeyboardInputView.SHAPE_CIRCLE));
+                    vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.13F, nh * 0.42F, small, "2", VirtualKeyboardInputView.SHAPE_CIRCLE));
+                    vButtons.add(new VirtualKeyboardInputView.VirtualButton(nw * 0.20F, nh * 0.42F, small, "3", VirtualKeyboardInputView.SHAPE_CIRCLE));
+                }
+                java.util.ArrayList<VirtualKeyboardInputView.VirtualAnalog> vAnalogs = new java.util.ArrayList<>();
+                vAnalogs.add(new VirtualKeyboardInputView.VirtualAnalog(
+                        nw * 0.12F, nh * 0.72F, nh * 0.34F, "W", "S", "A", "D", 0.35F));
+                VirtualControllerPresetManagerFragment.putOrCreateVirtualControllerPreset(
+                        "Cyclone", nativeRes, vButtons, vAnalogs, new java.util.ArrayList<>());
             }
-            java.util.ArrayList<VirtualKeyboardInputView.VirtualAnalog> vAnalogs = new java.util.ArrayList<>();
-            vAnalogs.add(new VirtualKeyboardInputView.VirtualAnalog(
-                    nw * 0.12F, nh * 0.72F, nh * 0.34F, "W", "S", "A", "D", 0.35F));
-            VirtualControllerPresetManagerFragment.putOrCreateVirtualControllerPreset(
-                    "Cyclone", nativeRes, vButtons, vAnalogs, new java.util.ArrayList<>());
             ShortcutsFragment.putSelectedVirtualControllerPreset("Vortex", "Cyclone");
             ShortcutsFragment.putVirtualControllerXInput("Vortex", false);
 
             cycloneEnsureLocalAppData();
+
+            // dxvk only writes its state cache if the directory already exists
+            //noinspection ResultOfMethodCallIgnored
+            new File(homeDir, ".cache/dxvk-shader-cache").mkdirs();
 
             File exe = new File(winePrefixesDir, winePrefix + "/drive_c/Vortex/Vortex.exe");
             cycloneStatus(getString(R.string.cyclone_setup_game));
@@ -1108,7 +1136,7 @@ public class MainActivity extends AppCompatActivity {
 
     // Vortex version encoded as major*1_000_000 + minor*1000 + patch, or -1 if the
     // binary carries no "Vortex vX.Y.Z" marker (the stale self-updating base has none).
-    private static long readExeVersion(File f) {
+    public static long readExeVersion(File f) {
         final byte[] marker = {'V', 'o', 'r', 't', 'e', 'x', ' ', 'v'};
         byte[] buf = new byte[1 << 16];
         int m = 0;

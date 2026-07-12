@@ -91,6 +91,7 @@ import java.util.Set;
 public class EmulationActivity extends AppCompatActivity implements View.OnApplyWindowInsetsListener {
 
     public void exitToWebView() {
+        watchdogRunning = false;
         WineWrapper.killAll();
         disconnectController(virtualXInputControllerId);
         stopInputServer();
@@ -103,7 +104,8 @@ public class EmulationActivity extends AppCompatActivity implements View.OnApply
 
     public void openCycloneSettings() {
         android.content.SharedPreferences sp = getSharedPreferences("cyclone", MODE_PRIVATE);
-        View v = getLayoutInflater().inflate(R.layout.cyclone_settings, null);
+        android.view.ContextThemeWrapper themed = new android.view.ContextThemeWrapper(this, R.style.Theme_Cyclone_Dialog);
+        View v = android.view.LayoutInflater.from(themed).inflate(R.layout.cyclone_settings, null);
 
         // Framerate (applies next launch via DXVK_FRAME_RATE)
         int fps = sp.getInt("fpsCap", 60);
@@ -150,10 +152,39 @@ public class EmulationActivity extends AppCompatActivity implements View.OnApply
         ((android.widget.RadioGroup) v.findViewById(R.id.rg_gfx)).setOnCheckedChangeListener(
                 (g, id) -> sp.edit().putInt("renderHeight", id == R.id.gfx_1080 ? 1080 : 720).apply());
 
-        // Extra buttons (apply next launch, off by default)
-        bindButtonToggle(v, R.id.cb_e, sp, "btnE");
-        bindButtonToggle(v, R.id.cb_r, sp, "btnR");
-        bindButtonToggle(v, R.id.cb_num, sp, "btnNumbers");
+        // Performance preset (applies next launch)
+        String preset = sp.getString("perfPreset", "stable");
+        ((android.widget.RadioButton) v.findViewById(
+                "fast".equals(preset) ? R.id.perf_fast : R.id.perf_stable)).setChecked(true);
+        ((android.widget.RadioGroup) v.findViewById(R.id.rg_perf)).setOnCheckedChangeListener(
+                (g, id) -> sp.edit().putString("perfPreset", id == R.id.perf_fast ? "fast" : "stable").apply());
+
+        // FPS counter overlay (applies next launch)
+        bindButtonToggle(v, R.id.cb_fps, sp, "fpsHud");
+
+        // Extra buttons (apply next launch, off by default); toggling one rebuilds
+        // the default layout, so it also discards a custom arrangement
+        bindLayoutButtonToggle(v, R.id.cb_e, sp, "btnE");
+        bindLayoutButtonToggle(v, R.id.cb_r, sp, "btnR");
+        bindLayoutButtonToggle(v, R.id.cb_num, sp, "btnNumbers");
+
+        android.widget.Button editControls = v.findViewById(R.id.btn_edit_controls);
+        editControls.setOnClickListener((b) -> {
+            sp.edit().putBoolean("controlsCustomized", true).apply();
+            com.micewine.emu.adapters.AdapterPreset.clickedPresetName = "Cyclone";
+            startActivity(new Intent(this, VirtualControllerOverlayMapper.class));
+        });
+        editControls.setOnLongClickListener((b) -> {
+            sp.edit().putBoolean("controlsCustomized", false).apply();
+            Toast.makeText(this, "Controls layout resets on the next launch", Toast.LENGTH_SHORT).show();
+            return true;
+        });
+
+        // Safe mode: next launch ignores tuning and uses the safest settings
+        bindButtonToggle(v, R.id.cb_safe, sp, "safeMode");
+
+        v.findViewById(R.id.btn_doctor).setOnClickListener(
+                (b) -> io.github.arbuzyonak.cyclone.CycloneDoctor.show(this));
 
         // Temperature
         android.content.Intent bat = registerReceiver(null,
@@ -162,7 +193,7 @@ public class EmulationActivity extends AppCompatActivity implements View.OnApply
         ((android.widget.TextView) v.findViewById(R.id.tv_temp))
                 .setText("Temperature: " + (t > 0 ? (t / 10F) + "°C" : "--"));
 
-        new android.app.AlertDialog.Builder(this)
+        new android.app.AlertDialog.Builder(this, R.style.Theme_Cyclone_Dialog)
                 .setTitle("Settings")
                 .setView(v)
                 .setPositiveButton("Done", null)
@@ -173,6 +204,13 @@ public class EmulationActivity extends AppCompatActivity implements View.OnApply
         android.widget.CheckBox cb = root.findViewById(id);
         cb.setChecked(sp.getBoolean(key, false));
         cb.setOnCheckedChangeListener((b, checked) -> sp.edit().putBoolean(key, checked).apply());
+    }
+
+    private void bindLayoutButtonToggle(View root, int id, android.content.SharedPreferences sp, String key) {
+        android.widget.CheckBox cb = root.findViewById(id);
+        cb.setChecked(sp.getBoolean(key, false));
+        cb.setOnCheckedChangeListener((b, checked) ->
+                sp.edit().putBoolean(key, checked).putBoolean("controlsCustomized", false).apply());
     }
 
     public static boolean chatKeyboardOpen = false;
@@ -238,6 +276,9 @@ public class EmulationActivity extends AppCompatActivity implements View.OnApply
         prepareControllersMappings();
 
         getWindow().setFlags(FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS | FLAG_KEEP_SCREEN_ON | FLAG_TRANSLUCENT_STATUS, 0);
+        getWindow().setSustainedPerformanceMode(true);
+        startThermalMonitor();
+        startGameWatchdog();
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         setContentView(R.layout.activity_emulation);
 
@@ -590,8 +631,127 @@ public class EmulationActivity extends AppCompatActivity implements View.OnApply
 
     @Override
     protected void onDestroy() {
+        watchdogRunning = false;
         unregisterReceiver(receiver);
+        stopThermalMonitor();
         super.onDestroy();
+    }
+
+    private volatile boolean watchdogRunning = false;
+
+    // Watches the game process itself: pre-game wine service .exes don't count,
+    // so a dead game is noticed even while wineserver keeps running.
+    private static boolean vortexProcessAlive() {
+        java.io.File[] procs = new java.io.File("/proc").listFiles();
+        if (procs == null) return false;
+        for (java.io.File p : procs) {
+            String name = p.getName();
+            if (name.isEmpty() || name.charAt(0) < '0' || name.charAt(0) > '9') continue;
+            try {
+                String cmd = new String(java.nio.file.Files.readAllBytes(
+                        new java.io.File(p, "cmdline").toPath())).toLowerCase();
+                if (cmd.contains("vortex") && cmd.contains(".exe")) return true;
+            } catch (Exception ignored) {
+            }
+        }
+        return false;
+    }
+
+    private void startGameWatchdog() {
+        if (!"Vortex".equals(selectedGameName)) return;
+        watchdogRunning = true;
+        new Thread(() -> {
+            long start = System.currentTimeMillis();
+            boolean seen = false;
+            int missing = 0;
+            while (watchdogRunning) {
+                try {
+                    Thread.sleep(2000);
+                } catch (InterruptedException e) {
+                    return;
+                }
+                if (!watchdogRunning) return;
+                if (vortexProcessAlive()) {
+                    seen = true;
+                    missing = 0;
+                    continue;
+                }
+                if (!seen) {
+                    if (System.currentTimeMillis() - start > 90_000) {
+                        watchdogRunning = false;
+                        runOnUiThread(() -> showGameProblemDialog(true));
+                    }
+                } else if (++missing >= 3) {
+                    watchdogRunning = false;
+                    runOnUiThread(() -> showGameProblemDialog(false));
+                }
+            }
+        }).start();
+    }
+
+    private void showGameProblemDialog(boolean neverStarted) {
+        if (isFinishing() || isDestroyed()) return;
+        new android.app.AlertDialog.Builder(this, R.style.Theme_Cyclone_Dialog)
+                .setTitle(neverStarted ? "Game didn't start" : "Game closed unexpectedly")
+                .setMessage(neverStarted
+                        ? "Vortex never came up. Retry, or turn on Safe mode in Settings if it keeps happening."
+                        : "Vortex stopped running. Rejoin, or check the log if it keeps happening.")
+                .setPositiveButton(neverStarted ? "Retry" : "Rejoin", (d, w) -> relaunchGame())
+                .setNegativeButton("Leave", (d, w) -> exitToWebView())
+                .setNeutralButton("View log", (d, w) -> {
+                    drawerLayout.setDrawerLockMode(DrawerLayout.LOCK_MODE_UNLOCKED);
+                    drawerLayout.openDrawer(GravityCompat.END);
+                })
+                .show();
+    }
+
+    private void relaunchGame() {
+        String exeArgs = MainActivity.cycloneLastExeArgs;
+        if (exeArgs == null) {
+            exitToWebView();
+            return;
+        }
+        watchdogRunning = false;
+        WineWrapper.killAll();
+        disconnectController(virtualXInputControllerId);
+        stopInputServer();
+        cleanup();
+
+        Intent relaunch = new Intent(this, MainActivity.class);
+        relaunch.putExtra("shortcutName", "Vortex");
+        relaunch.putExtra("cycloneExeArgs", exeArgs);
+        relaunch.putExtra("cycloneSessionToken", MainActivity.cycloneLastSessionToken);
+        relaunch.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        startActivity(relaunch);
+        finish();
+    }
+
+    private android.os.PowerManager.OnThermalStatusChangedListener thermalListener;
+    private int thermalWarnedAt = 0;
+
+    private void startThermalMonitor() {
+        if (SDK_INT < VERSION_CODES.Q) return;
+        android.os.PowerManager pm = (android.os.PowerManager) getSystemService(POWER_SERVICE);
+        if (pm == null) return;
+        thermalListener = status -> {
+            // warn once per severity step so it doesn't nag on every re-evaluation
+            if (status >= android.os.PowerManager.THERMAL_STATUS_SEVERE && status > thermalWarnedAt) {
+                thermalWarnedAt = status;
+                runOnUiThread(() -> Toast.makeText(this,
+                        "Phone is running hot — lowering Framerate or Graphics in Settings helps.",
+                        Toast.LENGTH_LONG).show());
+            } else if (status <= android.os.PowerManager.THERMAL_STATUS_MODERATE) {
+                thermalWarnedAt = 0;
+            }
+        };
+        pm.addThermalStatusListener(thermalListener);
+    }
+
+    private void stopThermalMonitor() {
+        if (SDK_INT < VERSION_CODES.Q || thermalListener == null) return;
+        android.os.PowerManager pm = (android.os.PowerManager) getSystemService(POWER_SERVICE);
+        if (pm != null) pm.removeThermalStatusListener(thermalListener);
+        thermalListener = null;
     }
 
     public void onReceiveConnection(Intent intent) {

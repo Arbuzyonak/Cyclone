@@ -226,6 +226,7 @@
     <string name="selected_box64">Selected Box64</string>
     <string name="install">Install</string>
     <string name="export_log">Export Log</string>
+    <string name="share_log">Share Log</string>
     <string name="controller_view_title">Test Controllers</string>
     <string name="exe_path">Executable Path</string>
     <string name="controller_mapping_type">Controller Mapping Type</string>
@@ -282,6 +283,7 @@
     <string name="cyclone_setup_installing" translatable="false">Installing components…</string>
     <string name="cyclone_setup_prefix" translatable="false">Preparing Windows environment…</string>
     <string name="cyclone_setup_game" translatable="false">Downloading Vortex…</string>
+    <string name="cyclone_setup_hint" translatable="false">First-time setup downloads about 400 MB. Keep the app open — this only happens once.</string>
     <string name="cyclone_setup_launching" translatable="false">Launching…</string>
     <string name="cyclone_update_started" translatable="false">Updating game client…</string>
     <string name="cyclone_update_done" translatable="false">Game client is up to date.</string>
