@@ -51,6 +51,7 @@ public class CycloneWebActivity extends AppCompatActivity {
     private ProgressBar progressBar;
     private View errorView;
     private String lastLoadedUrl = START_URL;
+    private boolean triedCache = false;
     private ValueCallback<Uri[]> pendingFileCallback;
     private volatile boolean clientUpdateRunning = false;
 
@@ -73,6 +74,16 @@ public class CycloneWebActivity extends AppCompatActivity {
         findViewById(R.id.retry_button).setOnClickListener(v -> {
             hideError();
             webView.loadUrl(lastLoadedUrl);
+        });
+        // escape hatch for a wedged session: long-press retry to sign out completely
+        findViewById(R.id.retry_button).setOnLongClickListener(v -> {
+            CookieManager.getInstance().removeAllCookies(null);
+            CookieManager.getInstance().flush();
+            webView.clearCache(true);
+            Toast.makeText(this, "Signed out", Toast.LENGTH_SHORT).show();
+            hideError();
+            webView.loadUrl(START_URL);
+            return true;
         });
 
         View root = findViewById(R.id.root);
@@ -108,13 +119,23 @@ public class CycloneWebActivity extends AppCompatActivity {
             public void onPageFinished(WebView view, String url) {
                 progressBar.setVisibility(View.GONE);
                 if (errorView.getVisibility() == View.VISIBLE) hideError();
+                triedCache = false;
+                view.getSettings().setCacheMode(WebSettings.LOAD_DEFAULT);
                 injectNavCss(view);
                 injectUpdateButton(view);
             }
 
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
-                if (request.isForMainFrame()) showError();
+                if (!request.isForMainFrame()) return;
+                // offline: retry once straight from cache so the library still shows
+                if (!triedCache) {
+                    triedCache = true;
+                    view.getSettings().setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
+                    view.post(() -> view.loadUrl(lastLoadedUrl));
+                    return;
+                }
+                showError();
             }
 
             @Override
@@ -164,6 +185,78 @@ public class CycloneWebActivity extends AppCompatActivity {
         } else {
             webView.loadUrl(START_URL);
         }
+
+        maybeShowWelcome();
+        checkForAppUpdate();
+    }
+
+    private void maybeShowWelcome() {
+        android.content.SharedPreferences sp = getSharedPreferences("cyclone", MODE_PRIVATE);
+        if (sp.getBoolean("welcomeShown", false)) return;
+        sp.edit().putBoolean("welcomeShown", true).apply();
+        new android.app.AlertDialog.Builder(this, R.style.Theme_Cyclone_Dialog)
+                .setTitle("Welcome to Cyclone")
+                .setMessage("Sign in to your Vortex account, then hit Play on a game."
+                        + "\n\nThe first launch downloads the runtime (about 400 MB) and can take a few minutes."
+                        + "\n\nIn game: drag to look around, use the joystick to move, and the top-corner button opens the menu.")
+                .setPositiveButton("Got it", null)
+                .show();
+    }
+
+    // Checks GitHub releases at most once a day; compat builds only look at -compat
+    // tags so nobody gets pointed at an APK for the wrong GPU.
+    private void checkForAppUpdate() {
+        android.content.SharedPreferences sp = getSharedPreferences("cyclone", MODE_PRIVATE);
+        long last = sp.getLong("updateCheckAt", 0);
+        if (System.currentTimeMillis() - last < 24L * 60 * 60 * 1000) return;
+        new Thread(() -> {
+            try {
+                okhttp3.OkHttpClient client = new okhttp3.OkHttpClient();
+                okhttp3.Request req = new okhttp3.Request.Builder()
+                        .url("https://api.github.com/repos/Arbuzyonak/Cyclone/releases?per_page=15")
+                        .header("Accept", "application/vnd.github+json")
+                        .build();
+                try (okhttp3.Response resp = client.newCall(req).execute()) {
+                    if (!resp.isSuccessful() || resp.body() == null) return;
+                    String body = resp.body().string();
+                    sp.edit().putLong("updateCheckAt", System.currentTimeMillis()).apply();
+                    boolean compat = com.micewine.emu.BuildConfig.USE_SYSTEM_VULKAN;
+                    java.util.regex.Matcher m = java.util.regex.Pattern
+                            .compile("\"tag_name\"\\s*:\\s*\"(v?[0-9.]+(-compat)?)\"").matcher(body);
+                    long best = -1;
+                    String bestTag = null;
+                    while (m.find()) {
+                        boolean tagCompat = m.group(2) != null;
+                        if (tagCompat != compat) continue;
+                        long v = versionScore(m.group(1));
+                        if (v > best) {
+                            best = v;
+                            bestTag = m.group(1);
+                        }
+                    }
+                    if (bestTag == null || best <= versionScore(com.micewine.emu.BuildConfig.VERSION_NAME)) return;
+                    final String tag = bestTag;
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        new android.app.AlertDialog.Builder(this, R.style.Theme_Cyclone_Dialog)
+                                .setTitle("Update available")
+                                .setMessage("Cyclone " + tag.replace("v", "").replace("-compat", "")
+                                        + " is out. Get it from GitHub?")
+                                .setPositiveButton("Open", (d, w) -> startActivity(new Intent(Intent.ACTION_VIEW,
+                                        Uri.parse("https://github.com/Arbuzyonak/Cyclone/releases/tag/" + tag))))
+                                .setNegativeButton("Later", null)
+                                .show();
+                    });
+                }
+            } catch (Exception ignored) {
+            }
+        }).start();
+    }
+
+    private static long versionScore(String s) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d+)\\.(\\d+)\\.(\\d+)").matcher(s);
+        if (!m.find()) return -1;
+        return Long.parseLong(m.group(1)) * 1_000_000L + Long.parseLong(m.group(2)) * 1000L + Long.parseLong(m.group(3));
     }
 
     private boolean shouldOverride(Uri url, boolean isMainFrame) {
@@ -183,7 +276,7 @@ public class CycloneWebActivity extends AppCompatActivity {
         android.content.SharedPreferences sp = getSharedPreferences("cyclone", MODE_PRIVATE);
         if (!sp.getBoolean("firstLaunchHintShown", false)) {
             sp.edit().putBoolean("firstLaunchHintShown", true).apply();
-            new android.app.AlertDialog.Builder(this)
+            new android.app.AlertDialog.Builder(this, R.style.Theme_Cyclone_Dialog)
                     .setTitle("First launch")
                     .setMessage("The first time you play, Vortex may ask you to sign in from a "
                             + "browser instead of joining. If that happens, press Menu to leave, "
@@ -252,7 +345,14 @@ public class CycloneWebActivity extends AppCompatActivity {
             "b.textContent='Update';" +
             "b.style.cursor='pointer';" +
             "b.addEventListener('click',function(e){e.preventDefault();CycloneBridge.updateClient();});" +
-            "settings.parentNode.insertBefore(b,settings.nextSibling);})();";
+            "settings.parentNode.insertBefore(b,settings.nextSibling);" +
+            "var h=settings.cloneNode(false);" +
+            "h.id='cyclone-doctor-btn';" +
+            "h.removeAttribute('href');" +
+            "h.textContent='Help';" +
+            "h.style.cursor='pointer';" +
+            "h.addEventListener('click',function(e){e.preventDefault();CycloneBridge.openDoctor();});" +
+            "b.parentNode.insertBefore(h,b.nextSibling);})();";
         view.evaluateJavascript(js, null);
     }
 
@@ -264,6 +364,13 @@ public class CycloneWebActivity extends AppCompatActivity {
     }
 
     private class CycloneBridge {
+        @JavascriptInterface
+        public void openDoctor() {
+            runOnUiThread(() -> {
+                if (!isFinishing() && !isDestroyed()) CycloneDoctor.show(CycloneWebActivity.this);
+            });
+        }
+
         @JavascriptInterface
         public void updateClient() {
             if (clientUpdateRunning) return;
@@ -327,12 +434,20 @@ public class CycloneWebActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (webView != null) webView.onResume();
+        if (webView != null) {
+            webView.onResume();
+            webView.resumeTimers();
+        }
     }
 
     @Override
     protected void onPause() {
-        if (webView != null) webView.onPause();
+        // resumeTimers/pauseTimers are process-global; this is the only WebView, and
+        // freezing it keeps the page from burning CPU/RAM while the game runs.
+        if (webView != null) {
+            webView.onPause();
+            webView.pauseTimers();
+        }
         super.onPause();
     }
 

@@ -30,4 +30,12 @@
     <style name="Theme.MiceWine" parent="Base.Theme.MiceWine" />
     <style name="Theme.MiceWine.FullScreen" parent="Base.Theme.MiceWine.FullScreen" />
 
+    <!-- Dark dialogs matching the web shell (#12131A background, Vortex purple accent) -->
+    <style name="Theme.Cyclone.Dialog" parent="android:Theme.Material.Dialog.Alert">
+        <item name="android:colorBackground">#1B1C24</item>
+        <item name="android:textColorPrimary">#E9EAEC</item>
+        <item name="android:textColorSecondary">#B7B9C0</item>
+        <item name="android:colorAccent">#8A7DFF</item>
+    </style>
+
 </resources>
