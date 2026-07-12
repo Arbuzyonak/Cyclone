@@ -63,6 +63,16 @@
             android:layout_marginEnd="10dp">
         </com.google.android.material.button.MaterialButton>
 
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/shareLogButton"
+            android:text="@string/share_log"
+            android:textSize="15sp"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="60dp"
+            android:layout_marginEnd="10dp">
+        </com.google.android.material.button.MaterialButton>
+
     </LinearLayout>
 
 </LinearLayout>

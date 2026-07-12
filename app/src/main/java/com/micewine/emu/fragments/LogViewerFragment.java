@@ -40,6 +40,7 @@ public class LogViewerFragment extends Fragment implements ShellLoader.LogCallba
         MaterialButton exportLogButton = rootView.findViewById(R.id.exportLogButton);
 
         ShellLoader.connectOutput(this);
+        openSessionLog();
 
         scrollView.setOnScrollChangeListener((view, scrollX, scrollY, oldScrollX, oldScrollY) -> {
             View content = scrollView.getChildAt(0);
@@ -57,17 +58,73 @@ public class LogViewerFragment extends Fragment implements ShellLoader.LogCallba
         });
 
         exportLogButton.setOnClickListener((v) -> {
-            String logPath = "/storage/emulated/0/MiceWine/MiceWine-" + selectedGameName + "-Log-" + System.currentTimeMillis() / 1000 + ".txt";
+            // app-scoped external dir: works without storage permissions on every version
+            java.io.File dir = new java.io.File(requireContext().getExternalFilesDir(null), "logs");
+            //noinspection ResultOfMethodCallIgnored
+            dir.mkdirs();
+            java.io.File out = new java.io.File(dir, "Cyclone-" + selectedGameName + "-Log-" + System.currentTimeMillis() / 1000 + ".txt");
 
-            try (FileWriter writer = new FileWriter(logPath)) {
+            try (FileWriter writer = new FileWriter(out)) {
                 writer.write(logs.toString());
             } catch (IOException ignored) {
             }
 
-            exportLogButton.post(() -> Toast.makeText(getContext(), "Log Exported to " + logPath.substring(logPath.lastIndexOf("/") + 1), Toast.LENGTH_SHORT).show());
+            exportLogButton.post(() -> Toast.makeText(getContext(), "Log exported to " + out.getName(), Toast.LENGTH_SHORT).show());
+        });
+
+        MaterialButton shareLogButton = rootView.findViewById(R.id.shareLogButton);
+        shareLogButton.setOnClickListener((v) -> {
+            try {
+                java.io.File f = new java.io.File(requireContext().getCacheDir(), "cyclone-log.txt");
+                try (FileWriter writer = new FileWriter(f)) {
+                    writer.write(logs.toString());
+                }
+                android.net.Uri uri = androidx.core.content.FileProvider.getUriForFile(
+                        requireContext(), requireContext().getPackageName() + ".fileprovider", f);
+                android.content.Intent send = new android.content.Intent(android.content.Intent.ACTION_SEND)
+                        .setType("text/plain")
+                        .putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                        .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                startActivity(android.content.Intent.createChooser(send, "Share log"));
+            } catch (Exception e) {
+                Toast.makeText(getContext(), "Couldn't share log", Toast.LENGTH_SHORT).show();
+            }
         });
 
         return rootView;
+    }
+
+    private java.io.Writer sessionWriter;
+
+    // Mirror the session to disk so a crash can still be reported afterwards.
+    private void openSessionLog() {
+        try {
+            java.io.File logDir = new java.io.File(requireContext().getFilesDir(), "logs");
+            //noinspection ResultOfMethodCallIgnored
+            logDir.mkdirs();
+            java.io.File last = new java.io.File(logDir, "last-session.txt");
+            java.io.File prev = new java.io.File(logDir, "prev-session.txt");
+            if (last.exists()) {
+                //noinspection ResultOfMethodCallIgnored
+                prev.delete();
+                //noinspection ResultOfMethodCallIgnored
+                last.renameTo(prev);
+            }
+            sessionWriter = new java.io.BufferedWriter(new FileWriter(last));
+        } catch (IOException ignored) {
+        }
+    }
+
+    @Override
+    public void onDestroyView() {
+        if (sessionWriter != null) {
+            try {
+                sessionWriter.close();
+            } catch (IOException ignored) {
+            }
+            sessionWriter = null;
+        }
+        super.onDestroyView();
     }
 
     private String getLastLines(StringBuilder sb) {
@@ -99,6 +156,14 @@ public class LogViewerFragment extends Fragment implements ShellLoader.LogCallba
     @Override
     public void appendLogs(String text) {
         logs.append(text);
+
+        if (sessionWriter != null) {
+            try {
+                sessionWriter.write(text);
+                sessionWriter.flush();
+            } catch (IOException ignored) {
+            }
+        }
 
         if (!logViewerIsOpened) return;
 

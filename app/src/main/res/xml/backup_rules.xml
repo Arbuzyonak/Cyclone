@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the login cookies and app settings; the multi-GB runtime would blow the
+     backup quota and disable backup entirely. -->
+<full-backup-content>
+    <include domain="root" path="app_webview/Default/Cookies" />
+    <include domain="root" path="app_webview/Cookies" />
+    <include domain="sharedpref" path="cyclone.xml" />
+</full-backup-content>
