@@ -31,6 +31,19 @@ android {
         universalApk true
     }
 
+    flavorDimensions "gpu"
+    productFlavors {
+        standard {
+            dimension "gpu"
+            buildConfigField "boolean", "USE_SYSTEM_VULKAN", "false"
+        }
+        compat {
+            dimension "gpu"
+            versionNameSuffix "-compat"
+            buildConfigField "boolean", "USE_SYSTEM_VULKAN", "true"
+        }
+    }
+
     compileOptions.sourceCompatibility JavaVersion.VERSION_17
     compileOptions.targetCompatibility JavaVersion.VERSION_17
     packagingOptions.jniLibs.useLegacyPackaging true

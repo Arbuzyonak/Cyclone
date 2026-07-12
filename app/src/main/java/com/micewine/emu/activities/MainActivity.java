@@ -57,6 +57,7 @@ import static com.micewine.emu.core.RatPackageManager.installADToolsDriver;
 import static com.micewine.emu.core.RatPackageManager.installRat;
 import static com.micewine.emu.core.RatPackageManager.installablePackagesCategories;
 import static com.micewine.emu.core.RatPackageManager.listRatPackages;
+import static com.micewine.emu.core.RatPackageManager.listRatPackagesId;
 import static com.micewine.emu.core.ShellLoader.runCommand;
 import static com.micewine.emu.core.ShellLoader.runCommandWithOutput;
 import static com.micewine.emu.core.WineWrapper.getCpuHexMask;
@@ -832,6 +833,8 @@ public class MainActivity extends AppCompatActivity {
                 putExeArguments("Vortex", exeArgs);
             }
 
+            cycloneSelectVulkanDriver();
+
             java.util.List<AdapterEnvVar.EnvVar> vortexEnv = new java.util.ArrayList<>();
             vortexEnv.add(new AdapterEnvVar.EnvVar("WINEDLLOVERRIDES", "windows.gaming.input="));
             vortexEnv.add(new AdapterEnvVar.EnvVar("BOX64_DYNAREC_BIGBLOCK", "0"));
@@ -1056,6 +1059,28 @@ public class MainActivity extends AppCompatActivity {
             android.widget.TextView tv = findViewById(R.id.cyclone_setup_status);
             if (tv != null) tv.setText(msg);
         });
+    }
+
+    // Experimental "compat" build only: pin Vortex to the wrapper driver, which routes
+    // Vulkan through the device's own system driver instead of Turnip. Turnip is Adreno-only,
+    // so this is the only path that can produce an adapter on Mali GPUs (e.g. Galaxy A16).
+    // The standard build leaves the driver alone and keeps Turnip.
+    private void cycloneSelectVulkanDriver() {
+        if (!com.micewine.emu.BuildConfig.USE_SYSTEM_VULKAN) return;
+        try {
+            for (String id : listRatPackagesId(com.micewine.emu.adapters.AdapterRatPackage.VK_DRIVER)) {
+                RatPackageManager.RatPackage p = getPackageById(id);
+                if (p != null && p.getDriverLib() != null
+                        && p.getDriverLib().toLowerCase().contains("wrapper")) {
+                    ShortcutsFragment.putVulkanDriver("Vortex", id);
+                    android.util.Log.i("CycloneFlow", "compat: using system Vulkan driver " + id);
+                    return;
+                }
+            }
+            android.util.Log.e("CycloneFlow", "compat: wrapper Vulkan driver not found");
+        } catch (Exception e) {
+            android.util.Log.e("CycloneFlow", "compat: driver select failed: " + e);
+        }
     }
 
     private void cycloneEnsureLocalAppData() {
